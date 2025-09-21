@@ -1,0 +1,6 @@
+.{
+    .name = "Random Ralph",
+    .runnable = "src/main.py",
+    .img = "assets/ralph.jpg",
+    .emote = "assets/kaboom.mpp3",
+}
