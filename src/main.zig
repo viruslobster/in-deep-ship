@@ -1,8 +1,8 @@
 const std = @import("std");
-const Game = @import("game.zig");
+const Battleship = @import("battleship.zig");
 const Protocol = @import("protocol.zig");
 
-const game_ships: [5]Game.Ship = .{
+const game_ships: [5]Battleship.Ship = .{
     .{ .size = 5 },
     .{ .size = 4 },
     .{ .size = 3 },
@@ -12,7 +12,182 @@ const game_ships: [5]Game.Ship = .{
 
 const game_width = 10;
 const game_height = 10;
-const GameBoard = Game.Board(game_width, game_height, &game_ships);
+const BattleshipBoard = Battleship.Board(game_width, game_height, &game_ships);
+const Game = struct {
+    players: [2]Player,
+    boards: [2]BattleshipBoard,
+    radars: [2]BattleshipBoard,
+
+    fn init(player0: []const u8, player1: []const u8, gpa: std.mem.Allocator) Game {
+        const boards = [2]BattleshipBoard{
+            BattleshipBoard.init(),
+            BattleshipBoard.init(),
+        };
+        return .{
+            .players = [2]Player{
+                Player.init(player0, gpa),
+                Player.init(player1, gpa),
+            },
+            .boards = boards,
+            .radars = boards,
+        };
+    }
+
+    pub fn deinit(self: *Game) void {
+        for (&self.players) |*p| p.deinit();
+    }
+
+    pub fn allPlaced(self: *Game) bool {
+        for (&self.boards) |*b| if (!b.allPlaced()) return false;
+        return true;
+    }
+
+    fn playerIndex(self: *Game, player: *Player) usize {
+        if (&self.players[0] == player) return 0;
+        return 1;
+    }
+
+    fn startRound(self: *Game) !void {
+        for (&self.players) |*player| {
+            try player.spawn();
+            try player.writeMessage(.{ .round_start = {} });
+        }
+    }
+
+    fn resetState(self: *Game) !void {
+        self.boards = [2]BattleshipBoard{ BattleshipBoard.init(), BattleshipBoard.init() };
+        self.radars = [2]BattleshipBoard{ BattleshipBoard.init(), BattleshipBoard.init() };
+    }
+
+    fn placeShips(self: *Game, player_id: usize, placements: []const Protocol.Placement) !void {
+        const player = &self.players[player_id];
+        const board = &self.boards[player_id];
+        placeIfValid(board, placements) catch |err| {
+            std.log.err("{s}: placements '{any}' are invalid: {}", .{ player.name, placements, err });
+            return error.InvalidPlacement;
+        };
+        std.log.info("{s}: placed ships", .{player.name});
+        return;
+    }
+
+    fn takeTurn(self: *Game, player_id: usize, x: usize, y: usize) !void {
+        const player = &self.players[player_id];
+        const other = (player_id + 1) % 2;
+        const other_board = &self.boards[other];
+        const other_player = &self.players[other];
+        const shot = other_board.fire(x, y);
+        try player.writeMessage(.{ .turn_result = .{
+            .x = x,
+            .y = y,
+            .shot = protocolShot(shot),
+            .who = .you,
+        } });
+        try other_player.writeMessage(.{ .turn_result = .{
+            .x = x,
+            .y = y,
+            .shot = protocolShot(shot),
+            .who = .enemy,
+        } });
+        return;
+    }
+};
+
+fn protocolShot(shot: Battleship.Shot) Protocol.Shot {
+    return switch (shot) {
+        .Miss => .{ .miss = {} },
+        .Hit => .{ .hit = {} },
+        .Sink => |ship| .{ .sink = ship.size },
+    };
+}
+
+fn placeIfValid(board: *BattleshipBoard, placements: []const Protocol.Placement) !void {
+    const empty_board = BattleshipBoard.init();
+    if (!std.meta.eql(board.*, empty_board)) return error.BoardDirty;
+
+    for (placements) |placement| {
+        board.place(placement.size, placement.x, placement.y, placement.orientation) catch |err| {
+            board.* = empty_board;
+            return err;
+        };
+    }
+    for (&board.placed) |placed| if (!placed) return error.NotAllShipsPlaced;
+}
+
+pub const Player = struct {
+    name: []const u8,
+    program: []const u8,
+    stdin_buffer: [256]u8 = undefined,
+    stdout_buffer: [256]u8 = undefined,
+    child: ?std.process.Child = null,
+    stdout: ?std.fs.File.Reader = null,
+    stdin: ?std.fs.File.Writer = null,
+    gpa: std.mem.Allocator,
+
+    pub fn init(program: []const u8, gpa: std.mem.Allocator) Player {
+        return .{
+            .name = program,
+            .program = program,
+            .gpa = gpa,
+        };
+    }
+
+    pub fn deinit(self: *Player) void {
+        if (self.child) |*child| {
+            _ = child.kill() catch |err| {
+                std.log.err("Failed to kill {s}: {}", .{ self.name, err });
+            };
+        }
+    }
+
+    pub fn spawn(self: *Player) !void {
+        var child = std.process.Child.init(&.{self.program}, self.gpa);
+        child.stdin_behavior = .Pipe;
+        child.stdout_behavior = .Pipe;
+        child.stderr_behavior = .Inherit;
+
+        try child.spawn();
+        const stdout = child.stdout orelse return error.NoOutput;
+        const stdin = child.stdin orelse return error.NoInput;
+
+        try setNonBlocking(stdout.handle);
+        try setNonBlocking(stdin.handle);
+        self.child = child;
+        self.stdout = stdout.reader(&self.stdout_buffer);
+        self.stdin = stdin.writer(&self.stdin_buffer);
+    }
+
+    pub fn writeMessage(self: *Player, message: Protocol.Message) !void {
+        const child = self.child orelse return error.MustCallSpawnFirst;
+
+        if (self.stdin == null) {
+            const stdin = child.stdin orelse unreachable;
+            self.stdin = stdin.writer(&self.stdin_buffer);
+        }
+        const stdin = &(self.stdin orelse unreachable);
+        try stdin.interface.print("{f}\n", .{message});
+        try stdin.interface.flush();
+    }
+
+    pub fn pollMessage(self: *Player) !?Protocol.Message {
+        const child = self.child orelse return error.MustCallSpawnFirst;
+
+        if (self.stdout == null) {
+            const stdout = child.stdout orelse unreachable;
+            self.stdout = stdout.reader(&self.stdout_buffer);
+        }
+        const stdout = &(self.stdout orelse unreachable);
+        const message = Protocol.Message.parse(&stdout.interface, self.gpa) catch |err| {
+            if (err != error.ReadFailed) return err;
+
+            const actual_err = stdout.err orelse unreachable;
+            switch (actual_err) {
+                error.WouldBlock => return null,
+                else => return err,
+            }
+        };
+        return message;
+    }
+};
 
 fn play(
     gpa: std.mem.Allocator,
@@ -20,17 +195,105 @@ fn play(
     stdout: *std.Io.Writer,
     random: std.Random,
 ) !void {
-    const player = GameBoard.init();
-    _ = player;
-    _ = gpa;
     _ = stdin;
-    _ = stdout;
     _ = random;
+    var arena_allocator = std.heap.ArenaAllocator.init(gpa);
+    defer arena_allocator.deinit();
+
+    var game = Game.init("./entries/random-ralph/src/main.py", "./entries/random-ralph/src/main.py", arena_allocator.allocator());
+    defer game.deinit();
+    try game.startRound();
+    try playGame(&game, stdout, &arena_allocator);
+}
+
+fn playGame(game: *Game, stdout: *std.Io.Writer, arena_alloc: *std.heap.ArenaAllocator) !void {
+    try game.resetState();
+
+    for (&game.players) |*player| {
+        try player.writeMessage(.{ .game_start = {} });
+        try player.writeMessage(.{ .place_ships_request = {} });
+    }
+
+    // Place ships
+    var player_id: usize = 0;
+    while (true) {
+        player_id = (player_id + 1) % 2;
+        const player = &game.players[player_id];
+        const maybe_message = try player.pollMessage();
+        const message = maybe_message orelse continue;
+        switch (message) {
+            .place_ships_response => |placements| {
+                game.placeShips(player_id, placements) catch |err| switch (err) {
+                    error.InvalidPlacement => try player.writeMessage(.{ .place_ships_request = {} }),
+                    else => return err,
+                };
+            },
+            else => {}, //std.log.info("{s}: Unexpected message: {f}", .{ player.name, message }),
+        }
+        if (game.allPlaced()) break;
+    }
+
+    // Take turns
+    // TODO: randomize player_id
+    while (true) {
+        try playGameTurn(game, player_id);
+
+        try setCursor(stdout, .{ .row = 0, .col = 0 });
+        try eraseBelowCursor(stdout);
+        try stdout.print("Player 0: \n{f}", .{game.boards[0]});
+        try stdout.print("Player 1: \n{f}", .{game.boards[1]});
+        try stdout.flush();
+
+        if (game.boards[0].allSunk()) {
+            std.log.info("Player 1 won!", .{});
+            return;
+        } else if (game.boards[1].allSunk()) {
+            std.log.info("Player 0 won!", .{});
+            return;
+        }
+
+        player_id = (player_id + 1) % 2;
+        _ = arena_alloc.reset(.retain_capacity);
+        std.Thread.sleep(50 * std.time.ns_per_ms);
+    }
+}
+
+fn playGameTurn(game: *Game, player_id: usize) !void {
+    const player = &game.players[player_id];
+    try player.writeMessage(.{ .turn_request = {} });
 
     while (true) {
-        std.log.info("looping", .{});
-        std.Thread.sleep(1 * std.time.ns_per_s);
+        const maybe_message = try player.pollMessage();
+        const message = maybe_message orelse {
+            std.Thread.sleep(10 * std.time.ns_per_ms);
+            continue;
+        };
+
+        switch (message) {
+            .turn_response => |turn| try game.takeTurn(player_id, turn.x, turn.y),
+            else => {
+                std.log.info("{s}: Unexpected message: {f}", .{ player.name, message });
+                continue;
+            },
+        }
+        break;
     }
+}
+
+fn setNonBlocking(handle: std.fs.File.Handle) !void {
+    var flags = try std.posix.fcntl(handle, std.posix.F.GETFL, 0);
+    flags |= 1 << @bitOffsetOf(std.posix.O, "NONBLOCK");
+    _ = try std.posix.fcntl(handle, std.posix.F.SETFL, flags);
+}
+
+const Cursor = struct { row: u8, col: u8 };
+
+pub fn setCursor(stdout: *std.Io.Writer, cursor: Cursor) !void {
+    try stdout.print("\x1b[{};{}H", .{ cursor.row, cursor.col });
+}
+
+pub fn eraseBelowCursor(stdout: *std.Io.Writer) !void {
+    try stdout.print("\x1b[J", .{});
 }
 
 pub fn main() !void {

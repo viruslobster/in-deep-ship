@@ -1,22 +1,22 @@
 const std = @import("std");
-const Game = @import("game.zig");
+const Battleship = @import("battleship.zig");
 
 const Who = enum { you, enemy };
 
-const Placement = struct {
-    size: usize,
-    orientation: Game.Orientation,
+pub const Placement = struct {
+    size: u8,
+    orientation: Battleship.Orientation,
     x: usize,
     y: usize,
 };
 
-const Shot = union(enum) {
+pub const Shot = union(enum) {
     miss: void,
     hit: void,
     sink: usize,
 };
 
-const Message = union(enum) {
+pub const Message = union(enum) {
     round_start: void,
     game_start: void,
     place_ships_request: void,
@@ -55,7 +55,7 @@ const Message = union(enum) {
                 const cord_bytes = parts.next() orelse return error.TooFewParts;
                 if (cord_bytes.len < 2) return error.Format;
 
-                const orientation: Game.Orientation =
+                const orientation: Battleship.Orientation =
                     if (std.mem.eql(u8, "vertical", orientation_bytes))
                         .Vertical
                     else if (std.mem.eql(u8, "horizontal", orientation_bytes))
@@ -64,7 +64,7 @@ const Message = union(enum) {
                         return error.Format;
 
                 const placement = Placement{
-                    .size = try std.fmt.parseInt(usize, size_bytes, 10),
+                    .size = try std.fmt.parseInt(u8, size_bytes, 10),
                     .orientation = orientation,
                     .x = try std.fmt.parseInt(usize, cord_bytes[1..], 10),
                     .y = std.mem.indexOf(u8, std.ascii.uppercase, cord_bytes[0..1]) orelse return error.Format,
@@ -123,9 +123,9 @@ const Message = union(enum) {
 
     pub fn format(self: *const Message, sink: *std.Io.Writer) !void {
         switch (self.*) {
-            .round_start => try sink.print("round-start\n", .{}),
-            .game_start => try sink.print("game-start\n", .{}),
-            .place_ships_request => try sink.print("place-ships\n", .{}),
+            .round_start => try sink.print("round-start", .{}),
+            .game_start => try sink.print("game-start", .{}),
+            .place_ships_request => try sink.print("place-ships", .{}),
             .place_ships_response => |placements| {
                 try sink.print("place-ships", .{});
                 for (placements) |*placement| {
@@ -135,12 +135,12 @@ const Message = union(enum) {
                         .{ placement.size, placement.orientation, letter, placement.x },
                     );
                 }
-                try sink.print("\n", .{});
+                try sink.print("", .{});
             },
-            .turn_request => try sink.print("turn\n", .{}),
+            .turn_request => try sink.print("turn", .{}),
             .turn_response => |turn| {
                 const letter = std.ascii.uppercase[turn.y];
-                try sink.print("turn;{c}{d}\n", .{ letter, turn.x });
+                try sink.print("turn;{c}{d}", .{ letter, turn.x });
             },
             .turn_result => |turn| {
                 try sink.print("turn-result;", .{});
@@ -151,9 +151,9 @@ const Message = union(enum) {
                 const letter = std.ascii.uppercase[turn.y];
                 try sink.print("{c}{d};", .{ letter, turn.x });
                 try switch (turn.shot) {
-                    .miss => sink.print("miss\n", .{}),
-                    .hit => sink.print("hit\n", .{}),
-                    .sink => |size| sink.print("sink;{d}\n", .{size}),
+                    .miss => sink.print("miss", .{}),
+                    .hit => sink.print("hit", .{}),
+                    .sink => |size| sink.print("sink;{d}", .{size}),
                 };
             },
         }
@@ -166,19 +166,19 @@ test "message-format" {
         var sink = std.Io.Writer.fixed(&buffer);
         const msg: Message = .{ .round_start = {} };
         try msg.format(&sink);
-        try std.testing.expectEqualStrings("round-start\n", sink.buffered());
+        try std.testing.expectEqualStrings("round-start", sink.buffered());
     }
     {
         var sink = std.Io.Writer.fixed(&buffer);
         const msg: Message = .{ .game_start = {} };
         try msg.format(&sink);
-        try std.testing.expectEqualStrings("game-start\n", sink.buffered());
+        try std.testing.expectEqualStrings("game-start", sink.buffered());
     }
     {
         var sink = std.Io.Writer.fixed(&buffer);
         const msg: Message = .{ .place_ships_request = {} };
         try msg.format(&sink);
-        try std.testing.expectEqualStrings("place-ships\n", sink.buffered());
+        try std.testing.expectEqualStrings("place-ships", sink.buffered());
     }
     {
         var sink = std.Io.Writer.fixed(&buffer);
@@ -188,19 +188,19 @@ test "message-format" {
         };
         const msg: Message = .{ .place_ships_response = &placements };
         try msg.format(&sink);
-        try std.testing.expectEqualStrings("place-ships;3;horizontal;A0;4;vertical;J9\n", sink.buffered());
+        try std.testing.expectEqualStrings("place-ships;3;horizontal;A0;4;vertical;J9", sink.buffered());
     }
     {
         var sink = std.Io.Writer.fixed(&buffer);
         const msg: Message = .{ .turn_request = {} };
         try msg.format(&sink);
-        try std.testing.expectEqualStrings("turn\n", sink.buffered());
+        try std.testing.expectEqualStrings("turn", sink.buffered());
     }
     {
         var sink = std.Io.Writer.fixed(&buffer);
         const msg: Message = .{ .turn_response = .{ .x = 1, .y = 1 } };
         try msg.format(&sink);
-        try std.testing.expectEqualStrings("turn;B1\n", sink.buffered());
+        try std.testing.expectEqualStrings("turn;B1", sink.buffered());
     }
     {
         var sink = std.Io.Writer.fixed(&buffer);
@@ -208,7 +208,7 @@ test "message-format" {
             .turn_result = .{ .who = .you, .x = 2, .y = 3, .shot = .miss },
         };
         try msg.format(&sink);
-        try std.testing.expectEqualStrings("turn-result;you;D2;miss\n", sink.buffered());
+        try std.testing.expectEqualStrings("turn-result;you;D2;miss", sink.buffered());
     }
     {
         var sink = std.Io.Writer.fixed(&buffer);
@@ -216,7 +216,7 @@ test "message-format" {
             .turn_result = .{ .who = .enemy, .x = 2, .y = 3, .shot = .hit },
         };
         try msg.format(&sink);
-        try std.testing.expectEqualStrings("turn-result;enemy;D2;hit\n", sink.buffered());
+        try std.testing.expectEqualStrings("turn-result;enemy;D2;hit", sink.buffered());
     }
     {
         var sink = std.Io.Writer.fixed(&buffer);
@@ -224,7 +224,7 @@ test "message-format" {
             .turn_result = .{ .who = .enemy, .x = 2, .y = 3, .shot = .{ .sink = 5 } },
         };
         try msg.format(&sink);
-        try std.testing.expectEqualStrings("turn-result;enemy;D2;sink;5\n", sink.buffered());
+        try std.testing.expectEqualStrings("turn-result;enemy;D2;sink;5", sink.buffered());
     }
 }
 
