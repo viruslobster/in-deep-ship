@@ -42,7 +42,7 @@ class Move:
 
     def __str__(self) -> str:
         letter = string.ascii_uppercase[self.y]
-        return f"turn;{letter}{self.x}"
+        return f"take-turn;{letter}{self.x}"
 
 
 @dataclass
@@ -111,9 +111,8 @@ def log(message: str) -> None:
         
 
 def play_game() -> None:
+    log("py: starting game")
     wait_message("game-start")
-    print("game-start", flush=True)
-
     wait_message("place-ships")
     placements = random_placements()
     print(placements, flush=True)
@@ -124,14 +123,22 @@ def play_game() -> None:
         for y in range(10)
     ]
     random.shuffle(moves)
-
     while True:
-        wait_message("turn")
-        move = moves.pop()
-        print(move, flush=True)
-
-        result_data = wait_message("turn-result")
-        turn_result = TurnResult.parse(result_data)
+        line = input()
+        if "take-turn" in line:
+            move = moves.pop()
+            print(move, flush=True)
+        elif "turn-result" in line:
+            turn_result = TurnResult.parse(line)
+            log(f"py: got {turn_result}")
+        elif "win" in line:
+            log("py: won!")
+            return
+        elif "lose" in line:
+            log("py: lose...")
+            return
+        else:
+            log(f"py: unrecognized: {line}")
         
 
 

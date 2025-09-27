@@ -203,10 +203,28 @@ fn play(
     var game = Game.init("./entries/random-ralph/src/main.py", "./entries/random-ralph/src/main.py", arena_allocator.allocator());
     defer game.deinit();
     try game.startRound();
-    try playGame(&game, stdout, &arena_allocator);
+    var wins = [2]u8{ 0, 0 };
+    for (0..3) |i| {
+        try setCursor(stdout, .{ .row = 0, .col = 0 });
+        try eraseBelowCursor(stdout);
+        try stdout.print("Round {d}", .{i});
+        try stdout.flush();
+
+        std.Thread.sleep(1000 * std.time.ns_per_ms);
+        const winner_id = try playGame(&game, stdout, &arena_allocator);
+
+        try stdout.print("Player {d} won!\n", .{winner_id});
+        try stdout.flush();
+        std.Thread.sleep(1000 * std.time.ns_per_ms);
+        wins[winner_id] += 1;
+    }
+    try stdout.print("Player 0: {d} wins\n", .{wins[0]});
+    try stdout.print("Player 1: {d} wins\n", .{wins[1]});
 }
 
-fn playGame(game: *Game, stdout: *std.Io.Writer, arena_alloc: *std.heap.ArenaAllocator) !void {
+/// Returns the id of the winning player
+fn playGame(game: *Game, stdout: *std.Io.Writer, arena_alloc: *std.heap.ArenaAllocator) !usize {
+    std.log.debug("Starting game", .{});
     try game.resetState();
 
     for (&game.players) |*player| {
@@ -214,6 +232,7 @@ fn playGame(game: *Game, stdout: *std.Io.Writer, arena_alloc: *std.heap.ArenaAll
         try player.writeMessage(.{ .place_ships_request = {} });
     }
 
+    std.log.debug("Placing ships...", .{});
     // Place ships
     var player_id: usize = 0;
     while (true) {
@@ -223,16 +242,21 @@ fn playGame(game: *Game, stdout: *std.Io.Writer, arena_alloc: *std.heap.ArenaAll
         const message = maybe_message orelse continue;
         switch (message) {
             .place_ships_response => |placements| {
-                game.placeShips(player_id, placements) catch |err| switch (err) {
-                    error.InvalidPlacement => try player.writeMessage(.{ .place_ships_request = {} }),
-                    else => return err,
+                game.placeShips(player_id, placements) catch |err| {
+                    std.log.err("Place ships response: {}", .{err});
+                    switch (err) {
+                        error.InvalidPlacement => try player.writeMessage(.{ .place_ships_request = {} }),
+                        else => return err,
+                    }
                 };
             },
-            else => {}, //std.log.info("{s}: Unexpected message: {f}", .{ player.name, message }),
+            else => std.log.info("{s}: Unexpected message: {f}", .{ player.name, message }),
         }
         if (game.allPlaced()) break;
+        std.log.debug("Waiting for ships to be placed", .{});
     }
 
+    std.log.debug("Ships placed", .{});
     // Take turns
     // TODO: randomize player_id
     while (true) {
@@ -245,11 +269,13 @@ fn playGame(game: *Game, stdout: *std.Io.Writer, arena_alloc: *std.heap.ArenaAll
         try stdout.flush();
 
         if (game.boards[0].allSunk()) {
-            std.log.info("Player 1 won!", .{});
-            return;
+            try game.players[0].writeMessage(.{ .lose = {} });
+            try game.players[1].writeMessage(.{ .win = {} });
+            return 1;
         } else if (game.boards[1].allSunk()) {
-            std.log.info("Player 0 won!", .{});
-            return;
+            try game.players[0].writeMessage(.{ .win = {} });
+            try game.players[1].writeMessage(.{ .lose = {} });
+            return 0;
         }
 
         player_id = (player_id + 1) % 2;

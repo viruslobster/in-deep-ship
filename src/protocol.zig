@@ -32,6 +32,8 @@ pub const Message = union(enum) {
         y: usize,
         shot: Shot,
     },
+    win: void,
+    lose: void,
 
     pub fn parse(source: *std.Io.Reader, gpa: std.mem.Allocator) !Message {
         const buffer = try source.takeDelimiterExclusive('\n');
@@ -73,11 +75,11 @@ pub const Message = union(enum) {
                 if (parts.peek() == null) break;
             }
             return .{ .place_ships_response = try placements.toOwnedSlice(gpa) };
-        } else if (std.mem.eql(u8, msg_type, "turn")) {
+        } else if (std.mem.eql(u8, msg_type, "take-turn")) {
             if (parts.peek() == null) {
                 return .{ .turn_request = {} };
             }
-            // turn;A0
+            // take-turn;A0
             const cord_bytes = parts.next() orelse return error.TooFewParts;
             if (cord_bytes.len < 2) return error.Format;
 
@@ -117,6 +119,10 @@ pub const Message = union(enum) {
                     .y = std.mem.indexOf(u8, std.ascii.uppercase, cord_bytes[0..1]) orelse return error.Format,
                 },
             };
+        } else if (std.mem.eql(u8, msg_type, "win")) {
+            return .{ .win = {} };
+        } else if (std.mem.eql(u8, msg_type, "lose")) {
+            return .{ .lose = {} };
         }
         return error.UnknownMessage;
     }
@@ -137,10 +143,10 @@ pub const Message = union(enum) {
                 }
                 try sink.print("", .{});
             },
-            .turn_request => try sink.print("turn", .{}),
+            .turn_request => try sink.print("take-turn", .{}),
             .turn_response => |turn| {
                 const letter = std.ascii.uppercase[turn.y];
-                try sink.print("turn;{c}{d}", .{ letter, turn.x });
+                try sink.print("take-turn;{c}{d}", .{ letter, turn.x });
             },
             .turn_result => |turn| {
                 try sink.print("turn-result;", .{});
@@ -156,6 +162,8 @@ pub const Message = union(enum) {
                     .sink => |size| sink.print("sink;{d}", .{size}),
                 };
             },
+            .win => try sink.print("win", .{}),
+            .lose => try sink.print("lose", .{}),
         }
     }
 };
@@ -194,13 +202,13 @@ test "message-format" {
         var sink = std.Io.Writer.fixed(&buffer);
         const msg: Message = .{ .turn_request = {} };
         try msg.format(&sink);
-        try std.testing.expectEqualStrings("turn", sink.buffered());
+        try std.testing.expectEqualStrings("take-turn", sink.buffered());
     }
     {
         var sink = std.Io.Writer.fixed(&buffer);
         const msg: Message = .{ .turn_response = .{ .x = 1, .y = 1 } };
         try msg.format(&sink);
-        try std.testing.expectEqualStrings("turn;B1", sink.buffered());
+        try std.testing.expectEqualStrings("take-turn;B1", sink.buffered());
     }
     {
         var sink = std.Io.Writer.fixed(&buffer);
@@ -225,6 +233,18 @@ test "message-format" {
         };
         try msg.format(&sink);
         try std.testing.expectEqualStrings("turn-result;enemy;D2;sink;5", sink.buffered());
+    }
+    {
+        var sink = std.Io.Writer.fixed(&buffer);
+        const msg: Message = .{ .win = {} };
+        try msg.format(&sink);
+        try std.testing.expectEqualStrings("win", sink.buffered());
+    }
+    {
+        var sink = std.Io.Writer.fixed(&buffer);
+        const msg: Message = .{ .lose = {} };
+        try msg.format(&sink);
+        try std.testing.expectEqualStrings("lose", sink.buffered());
     }
 }
 
@@ -265,13 +285,13 @@ test "message-parse" {
         );
     }
     {
-        var source = std.Io.Reader.fixed("turn\n");
+        var source = std.Io.Reader.fixed("take-turn\n");
         const actual = try Message.parse(&source, gpa);
         const expected: Message = .{ .turn_request = {} };
         try std.testing.expectEqual(expected, actual);
     }
     {
-        var source = std.Io.Reader.fixed("turn;A0\n");
+        var source = std.Io.Reader.fixed("take-turn;A0\n");
         const actual = try Message.parse(&source, gpa);
         const expected: Message = .{ .turn_response = .{ .x = 0, .y = 0 } };
         try std.testing.expectEqual(expected, actual);
@@ -282,6 +302,18 @@ test "message-parse" {
         const expected: Message = .{
             .turn_result = .{ .who = .enemy, .x = 2, .y = 3, .shot = .{ .sink = 5 } },
         };
+        try std.testing.expectEqual(expected, actual);
+    }
+    {
+        var source = std.Io.Reader.fixed("win\n");
+        const actual = try Message.parse(&source, gpa);
+        const expected: Message = .{ .win = {} };
+        try std.testing.expectEqual(expected, actual);
+    }
+    {
+        var source = std.Io.Reader.fixed("lose\n");
+        const actual = try Message.parse(&source, gpa);
+        const expected: Message = .{ .lose = {} };
         try std.testing.expectEqual(expected, actual);
     }
 }
