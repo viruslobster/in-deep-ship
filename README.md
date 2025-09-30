@@ -15,7 +15,8 @@ Your entry should consist of:
 - Every contestant pair will play 1 round of 3 games.
 - Each game gives +10 point for a win -10 for a loss. The contestant with the most points wins the tournament.
 - Contestant programs will be invoked fresh each round.
-- You can use any programming language but no third party libraries. You're limited to the standard library of your language.
+- You can use any programming language but no third party libraries (with exceptions).
+    - You can use numpy and scipy.stats
 - All programs will run on the same hardware. Each will be limited to 5GiB of RAM and 2 CPU cores.
 - Programs have 5 seconds start up time and 1 second for each move.
     - Each time a program exceeds a time limit it will be penalized 1 point
