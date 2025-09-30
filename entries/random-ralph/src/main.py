@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 from copy import copy
 import random
 import string
@@ -21,8 +21,8 @@ class Placement:
         return Placement(
             size,
             "vertical" if random.random() > 0.5 else "horizontal",
-            random.randint(0 ,9),
-            random.randint(0 ,9),
+            random.randint(0, 10),
+            random.randint(0, 8),
         )
 
     def __str__(self):
@@ -73,7 +73,7 @@ def placement_valid(placement, occupied) -> bool:
             if placement.orientation == "horizontal"
             else (placement.x, placement.y + idx)
         )
-        if x > 9 or y > 9:
+        if x > 10 or y > 8:
             return False
 
         i = y * 10 + x
@@ -86,7 +86,7 @@ def placement_valid(placement, occupied) -> bool:
 
 def random_placements() -> Placements:
     placements = []
-    occupied = [False] * 100
+    occupied = [False] * 9 * 11
 
     for size in [5, 4, 3, 3, 2]:
         while True:
@@ -122,8 +122,8 @@ def play_game() -> None:
 
     moves = [
         Move(x, y)
-        for x in range(10)
-        for y in range(10)
+        for x in range(11)
+        for y in range(9)
     ]
     random.shuffle(moves)
     while True:

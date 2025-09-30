@@ -11,8 +11,8 @@ const game_ships: [5]Battleship.Ship = .{
     .{ .size = 2 },
 };
 
-const game_width = 10;
-const game_height = 10;
+const game_width = 11;
+const game_height = 9;
 const BattleshipBoard = Battleship.Board(game_width, game_height, &game_ships);
 const Game = struct {
     players: [2]Player,

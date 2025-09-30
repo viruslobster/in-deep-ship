@@ -21,8 +21,7 @@ Your entry should consist of:
     - Each time a program exceeds a time limit it will be penalized 1 point
 
 ## Battleship Rules
-We will use the standard battleship rules.
-- The game is played on a 10x10 grid.
+- The game is played on a 9x11 grid.
 - Ships are placed horizontally or vertically within the grid without overlapping.
 - The ship types are:
     - Carrier (5)
@@ -30,7 +29,7 @@ We will use the standard battleship rules.
     - Cruiser (3)
     - Submarine (3)
     - Destroyer (2)
-- Players fire on one square per turn. You know if each shot was a hit or miss. You also know if a shot sunk a ship and which ship was sunk.
+- Players fire on one square per turn. You know if each shot was a hit or miss. You also know if a shot sunk a ship and its size.
 - The first player to sink all the opponent's ships wins the game.
 
 ## Technical Details
