@@ -6,6 +6,9 @@ from time import sleep
 from dataclasses import dataclass
 import sys
 
+# Turn this on to test penatlies for taking too long in between moves
+RANDOM_SLEEP = True
+
 @dataclass
 class Placement:
     size: int
@@ -127,6 +130,9 @@ def play_game() -> None:
         line = input()
         if "take-turn" in line:
             move = moves.pop()
+            if RANDOM_SLEEP and random.random() > 0.5:
+                sleep(1.5)
+                
             print(move, flush=True)
         elif "turn-result" in line:
             turn_result = TurnResult.parse(line)

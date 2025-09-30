@@ -1,6 +1,7 @@
 const std = @import("std");
 const Battleship = @import("battleship.zig");
 const Protocol = @import("protocol.zig");
+const Meta = @import("meta.zig");
 
 const game_ships: [5]Battleship.Ship = .{
     .{ .size = 5 },
@@ -17,19 +18,21 @@ const Game = struct {
     players: [2]Player,
     boards: [2]BattleshipBoard,
     radars: [2]BattleshipBoard,
+    penalties: [2]u32,
 
-    fn init(player0: []const u8, player1: []const u8, gpa: std.mem.Allocator) Game {
+    fn init(gpa: std.mem.Allocator, entry0: *const Meta.Entry, entry1: *const Meta.Entry) Game {
         const boards = [2]BattleshipBoard{
             BattleshipBoard.init(),
             BattleshipBoard.init(),
         };
         return .{
             .players = [2]Player{
-                Player.init(player0, gpa),
-                Player.init(player1, gpa),
+                Player.init(entry0, gpa),
+                Player.init(entry1, gpa),
             },
             .boards = boards,
             .radars = boards,
+            .penalties = [2]u32{ 0, 0 },
         };
     }
 
@@ -63,10 +66,10 @@ const Game = struct {
         const player = &self.players[player_id];
         const board = &self.boards[player_id];
         placeIfValid(board, placements) catch |err| {
-            std.log.err("{s}: placements '{any}' are invalid: {}", .{ player.name, placements, err });
+            std.log.err("{s}: placements '{any}' are invalid: {}", .{ player.entry.name, placements, err });
             return error.InvalidPlacement;
         };
-        std.log.info("{s}: placed ships", .{player.name});
+        std.log.info("{s}: placed ships", .{player.entry.name});
         return;
     }
 
@@ -114,8 +117,7 @@ fn placeIfValid(board: *BattleshipBoard, placements: []const Protocol.Placement)
 }
 
 pub const Player = struct {
-    name: []const u8,
-    program: []const u8,
+    entry: *const Meta.Entry,
     stdin_buffer: [256]u8 = undefined,
     stdout_buffer: [256]u8 = undefined,
     child: ?std.process.Child = null,
@@ -123,10 +125,9 @@ pub const Player = struct {
     stdin: ?std.fs.File.Writer = null,
     gpa: std.mem.Allocator,
 
-    pub fn init(program: []const u8, gpa: std.mem.Allocator) Player {
+    pub fn init(entry: *const Meta.Entry, gpa: std.mem.Allocator) Player {
         return .{
-            .name = program,
-            .program = program,
+            .entry = entry,
             .gpa = gpa,
         };
     }
@@ -134,13 +135,13 @@ pub const Player = struct {
     pub fn deinit(self: *Player) void {
         if (self.child) |*child| {
             _ = child.kill() catch |err| {
-                std.log.err("Failed to kill {s}: {}", .{ self.name, err });
+                std.log.err("Failed to kill {s}: {}", .{ self.entry.name, err });
             };
         }
     }
 
     pub fn spawn(self: *Player) !void {
-        var child = std.process.Child.init(&.{self.program}, self.gpa);
+        var child = std.process.Child.init(&.{self.entry.runnable}, self.gpa);
         child.stdin_behavior = .Pipe;
         child.stdout_behavior = .Pipe;
         child.stderr_behavior = .Inherit;
@@ -189,18 +190,20 @@ pub const Player = struct {
     }
 };
 
-fn play(
+fn playDebug(
     gpa: std.mem.Allocator,
     stdin: *std.Io.Reader,
     stdout: *std.Io.Writer,
     random: std.Random,
+    entry0: *const Meta.Entry,
+    entry1: *const Meta.Entry,
 ) !void {
     _ = stdin;
     _ = random;
     var arena_allocator = std.heap.ArenaAllocator.init(gpa);
     defer arena_allocator.deinit();
 
-    var game = Game.init("./entries/random-ralph/src/main.py", "./entries/random-ralph/src/main.py", arena_allocator.allocator());
+    var game = Game.init(arena_allocator.allocator(), entry0, entry1);
     defer game.deinit();
     try game.startRound();
     var wins = [2]u8{ 0, 0 };
@@ -250,7 +253,7 @@ fn playGame(game: *Game, stdout: *std.Io.Writer, arena_alloc: *std.heap.ArenaAll
                     }
                 };
             },
-            else => std.log.info("{s}: Unexpected message: {f}", .{ player.name, message }),
+            else => std.log.info("{s}: Unexpected message: {f}", .{ player.entry.name, message }),
         }
         if (game.allPlaced()) break;
         std.log.debug("Waiting for ships to be placed", .{});
@@ -287,6 +290,7 @@ fn playGame(game: *Game, stdout: *std.Io.Writer, arena_alloc: *std.heap.ArenaAll
 fn playGameTurn(game: *Game, player_id: usize) !void {
     const player = &game.players[player_id];
     try player.writeMessage(.{ .turn_request = {} });
+    const t0 = std.time.milliTimestamp();
 
     while (true) {
         const maybe_message = try player.pollMessage();
@@ -294,11 +298,16 @@ fn playGameTurn(game: *Game, player_id: usize) !void {
             std.Thread.sleep(10 * std.time.ns_per_ms);
             continue;
         };
+        const elapsed = std.time.milliTimestamp() - t0;
+        if (elapsed > 1010) {
+            std.log.info("{s} took too long to respond!", .{player.entry.name});
+            game.penalties[player_id] += 1;
+        }
 
         switch (message) {
             .turn_response => |turn| try game.takeTurn(player_id, turn.x, turn.y),
             else => {
-                std.log.info("{s}: Unexpected message: {f}", .{ player.name, message });
+                std.log.info("{s}: Unexpected message: {f}", .{ player.entry.name, message });
                 continue;
             },
         }
@@ -322,6 +331,22 @@ pub fn eraseBelowCursor(stdout: *std.Io.Writer) !void {
     try stdout.print("\x1b[J", .{});
 }
 
+fn help(stderr: *std.Io.Writer) !void {
+    try stderr.print("Usage: in-deep-ship [play | debug]\n", .{});
+}
+
+fn helpDebug(stderr: *std.Io.Writer) !void {
+    try stderr.print(
+        \\Usage: in-deep-ship debug PLAYER0 PLAYER1
+        \\
+        \\  PLAYER0 and PLAYER1 are paths to executables
+        \\
+        \\  Hint: use in-deep-ship debug path0 path1 2>/tmp/stderr
+        \\  and tail -f /tmp/stderr in another window
+        \\
+    , .{});
+}
+
 pub fn main() !void {
     var stdin_buffer: [1024]u8 = undefined;
     var stdin_reader = std.fs.File.stdin().reader(&stdin_buffer);
@@ -330,13 +355,54 @@ pub fn main() !void {
     var stdout_buffer: [1024]u8 = undefined;
     var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
     const stdout = &stdout_writer.interface;
+    defer stdout.flush() catch {};
+
+    var stderr_buffer: [1024]u8 = undefined;
+    var stderr_writer = std.fs.File.stderr().writer(&stderr_buffer);
+    const stderr = &stderr_writer.interface;
+    defer stderr.flush() catch {};
 
     const seed: u64 = @intCast(std.time.microTimestamp());
     var rng = std.Random.DefaultPrng.init(seed);
     const random = rng.random();
 
-    try play(std.heap.page_allocator, stdin, stdout, random);
-    try stdout.flush();
+    var args = std.process.args();
+    // Skip binary file path
+    if (!args.skip()) {
+        try help(stderr);
+        return;
+    }
+    const command = args.next() orelse {
+        try help(stderr);
+        return;
+    };
+    if (std.mem.eql(u8, "play", command)) {
+        try stdout.print("todo\n", .{});
+        return;
+    }
+    if (std.mem.eql(u8, "debug", command)) {
+        const runnable0 = args.next();
+        const runnable1 = args.next();
+        if (runnable0 == null or runnable1 == null) {
+            try helpDebug(stderr);
+            return;
+        }
+        const entry0: Meta.Entry = .{
+            .name = "player0",
+            .runnable = runnable0 orelse unreachable,
+            .img = &.{},
+            .emote = &.{},
+        };
+        const entry1: Meta.Entry = .{
+            .name = "player1",
+            .runnable = runnable1 orelse unreachable,
+            .img = &.{},
+            .emote = &.{},
+        };
+        try playDebug(std.heap.page_allocator, stdin, stdout, random, &entry0, &entry1);
+        return;
+    }
+    try help(stderr);
 }
 
 test {
