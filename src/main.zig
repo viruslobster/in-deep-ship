@@ -2,6 +2,8 @@ const std = @import("std");
 const Battleship = @import("battleship.zig");
 const Protocol = @import("protocol.zig");
 const Meta = @import("meta.zig");
+const Graphics = @import("graphics.zig");
+const Resource = @import("resource.zig");
 
 const game_ships: [5]Battleship.Ship = .{
     .{ .size = 5 },
@@ -58,15 +60,28 @@ const Game = struct {
     }
 
     fn resetState(self: *Game) !void {
-        self.boards = [2]BattleshipBoard{ BattleshipBoard.init(), BattleshipBoard.init() };
-        self.radars = [2]BattleshipBoard{ BattleshipBoard.init(), BattleshipBoard.init() };
+        self.boards = [2]BattleshipBoard{
+            BattleshipBoard.init(),
+            BattleshipBoard.init(),
+        };
+        self.radars = [2]BattleshipBoard{
+            BattleshipBoard.init(),
+            BattleshipBoard.init(),
+        };
     }
 
-    fn placeShips(self: *Game, player_id: usize, placements: []const Protocol.Placement) !void {
+    fn placeShips(
+        self: *Game,
+        player_id: usize,
+        placements: []const Protocol.Placement,
+    ) !void {
         const player = &self.players[player_id];
         const board = &self.boards[player_id];
         placeIfValid(board, placements) catch |err| {
-            std.log.err("{s}: placements '{any}' are invalid: {}", .{ player.entry.name, placements, err });
+            std.log.err(
+                "{s}: placements '{any}' are invalid: {}",
+                .{ player.entry.name, placements, err },
+            );
             return error.InvalidPlacement;
         };
         std.log.info("{s}: placed ships", .{player.entry.name});
@@ -103,12 +118,20 @@ fn protocolShot(shot: Battleship.Shot) Protocol.Shot {
     };
 }
 
-fn placeIfValid(board: *BattleshipBoard, placements: []const Protocol.Placement) !void {
+fn placeIfValid(
+    board: *BattleshipBoard,
+    placements: []const Protocol.Placement,
+) !void {
     const empty_board = BattleshipBoard.init();
     if (!std.meta.eql(board.*, empty_board)) return error.BoardDirty;
 
     for (placements) |placement| {
-        board.place(placement.size, placement.x, placement.y, placement.orientation) catch |err| {
+        board.place(
+            placement.size,
+            placement.x,
+            placement.y,
+            placement.orientation,
+        ) catch |err| {
             board.* = empty_board;
             return err;
         };
@@ -177,7 +200,10 @@ pub const Player = struct {
             self.stdout = stdout.reader(&self.stdout_buffer);
         }
         const stdout = &(self.stdout orelse unreachable);
-        const message = Protocol.Message.parse(&stdout.interface, self.gpa) catch |err| {
+        const message = Protocol.Message.parse(
+            &stdout.interface,
+            self.gpa,
+        ) catch |err| {
             if (err != error.ReadFailed) return err;
 
             const actual_err = stdout.err orelse unreachable;
@@ -190,6 +216,118 @@ pub const Player = struct {
     }
 };
 
+fn play(
+    gpa: std.mem.Allocator,
+    stdin: *std.Io.Reader,
+    stdout: *std.Io.Writer,
+    random: std.Random,
+) !void {
+    var g = Graphics.init(stdout);
+    _ = stdin;
+    _ = random;
+
+    try g.hideCursor();
+    try g.setCursor(.{ .row = 0, .col = 0 });
+    try g.eraseBelowCursor();
+
+    const grid =
+        \\     0     1     2     3     4     5     6     7     8     9    10
+        \\  ╭─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────╮
+        \\A │     │     │     │     │     │     │     │     │     │     │     │
+        \\  │     │     │     │     │     │     │     │     │     │     │     │
+        \\  ├─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┤
+        \\B │     │     │     │     │     │     │     │     │     │     │     │
+        \\  │     │     │     │     │     │     │     │     │     │     │     │
+        \\  ├─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┤
+        \\C │     │     │     │     │     │     │     │     │     │     │     │
+        \\  │     │     │     │     │     │     │     │     │     │     │     │
+        \\  ├─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┤
+        \\D │     │     │     │     │     │     │     │     │     │     │     │
+        \\  │     │     │     │     │     │     │     │     │     │     │     │
+        \\  ├─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┤
+        \\C │     │     │     │     │     │     │     │     │     │     │     │
+        \\  │     │     │     │     │     │     │     │     │     │     │     │
+        \\  ├─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┤
+        \\D │     │     │     │     │     │     │     │     │     │     │     │
+        \\  │     │     │     │     │     │     │     │     │     │     │     │
+        \\  ├─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┤
+        \\E │     │     │     │     │     │     │     │     │     │     │     │
+        \\  │     │     │     │     │     │     │     │     │     │     │     │
+        \\  ├─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┤
+        \\F │     │     │     │     │     │     │     │     │     │     │     │
+        \\  │     │     │     │     │     │     │     │     │     │     │     │
+        \\  ├─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┤
+        \\G │     │     │     │     │     │     │     │     │     │     │     │
+        \\  │     │     │     │     │     │     │     │     │     │     │     │
+        \\  ╰─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────╯
+    ;
+    try stdout.print("{s}\n", .{grid});
+    try stdout.flush();
+    std.Thread.sleep(1000 * std.time.ns_per_ms);
+
+    const ship_bytes = try Resource.ship.load(gpa);
+    try g.imageBytes(
+        ship_bytes,
+        .{ .image_id = Resource.ship.id(), .action = .transmit },
+    );
+    gpa.free(ship_bytes);
+
+    const explosion_bytes = try Resource.explosion.load(gpa);
+    try g.imageBytes(
+        explosion_bytes,
+        .{
+            .image_id = Resource.explosion.id(),
+            .action = .transmit,
+        },
+    );
+    gpa.free(explosion_bytes);
+
+    try g.imagePos(
+        6,
+        4,
+        .{
+            .action = .put,
+            .image_id = Resource.ship.id(),
+            .rows = 2,
+            .cols = 10,
+        },
+    );
+    try stdout.flush();
+
+    for (0..5) |j| {
+        const j_u32: u32 = @intCast(j);
+
+        for (0..10) |i| {
+            const i_u32: u32 = @intCast(i);
+            try g.imagePos(
+                15,
+                20,
+                .{
+                    .action = .put,
+                    .image_id = Resource.explosion.id(),
+                    .placement_id = 1,
+                    .source_rect = .{
+                        .x = 100 * i_u32,
+                        .y = 100 * j_u32,
+                        .w = 100,
+                        .h = 100,
+                    },
+                },
+            );
+            try stdout.flush();
+            std.Thread.sleep(50 * std.time.ns_per_ms);
+        }
+    }
+
+    std.Thread.sleep(2000 * std.time.ns_per_ms);
+    try g.setCursor(.{
+        .row = 40,
+        .col = 0,
+    });
+    try g.showCursor();
+    try stdout.flush();
+}
+
 fn playDebug(
     gpa: std.mem.Allocator,
     stdin: *std.Io.Reader,
@@ -200,6 +338,7 @@ fn playDebug(
 ) !void {
     _ = stdin;
     _ = random;
+    var g = Graphics.init(stdout);
     var arena_allocator = std.heap.ArenaAllocator.init(gpa);
     defer arena_allocator.deinit();
 
@@ -208,13 +347,13 @@ fn playDebug(
     try game.startRound();
     var wins = [2]u8{ 0, 0 };
     for (0..3) |i| {
-        try setCursor(stdout, .{ .row = 0, .col = 0 });
-        try eraseBelowCursor(stdout);
+        try g.setCursor(.{ .row = 0, .col = 0 });
+        try g.eraseBelowCursor();
         try stdout.print("Round {d}", .{i});
         try stdout.flush();
 
         std.Thread.sleep(1000 * std.time.ns_per_ms);
-        const winner_id = try playGame(&game, stdout, &arena_allocator);
+        const winner_id = try playGame(&game, &g, &arena_allocator);
 
         try stdout.print("Player {d} won!\n", .{winner_id});
         try stdout.flush();
@@ -226,7 +365,7 @@ fn playDebug(
 }
 
 /// Returns the id of the winning player
-fn playGame(game: *Game, stdout: *std.Io.Writer, arena_alloc: *std.heap.ArenaAllocator) !usize {
+fn playGame(game: *Game, g: *Graphics, arena_alloc: *std.heap.ArenaAllocator) !usize {
     std.log.debug("Starting game", .{});
     try game.resetState();
 
@@ -265,11 +404,11 @@ fn playGame(game: *Game, stdout: *std.Io.Writer, arena_alloc: *std.heap.ArenaAll
     while (true) {
         try playGameTurn(game, player_id);
 
-        try setCursor(stdout, .{ .row = 0, .col = 0 });
-        try eraseBelowCursor(stdout);
-        try stdout.print("Player 0: \n{f}", .{game.boards[0]});
-        try stdout.print("Player 1: \n{f}", .{game.boards[1]});
-        try stdout.flush();
+        try g.setCursor(.{ .row = 0, .col = 0 });
+        try g.eraseBelowCursor();
+        try g.stdout.print("Player 0: \n{f}", .{game.boards[0]});
+        try g.stdout.print("Player 1: \n{f}", .{game.boards[1]});
+        try g.stdout.flush();
 
         if (game.boards[0].allSunk()) {
             try game.players[0].writeMessage(.{ .lose = {} });
@@ -321,16 +460,6 @@ fn setNonBlocking(handle: std.fs.File.Handle) !void {
     _ = try std.posix.fcntl(handle, std.posix.F.SETFL, flags);
 }
 
-const Cursor = struct { row: u8, col: u8 };
-
-pub fn setCursor(stdout: *std.Io.Writer, cursor: Cursor) !void {
-    try stdout.print("\x1b[{};{}H", .{ cursor.row, cursor.col });
-}
-
-pub fn eraseBelowCursor(stdout: *std.Io.Writer) !void {
-    try stdout.print("\x1b[J", .{});
-}
-
 fn help(stderr: *std.Io.Writer) !void {
     try stderr.print("Usage: in-deep-ship [play | debug]\n", .{});
 }
@@ -377,7 +506,7 @@ pub fn main() !void {
         return;
     };
     if (std.mem.eql(u8, "play", command)) {
-        try stdout.print("todo\n", .{});
+        try play(std.heap.page_allocator, stdin, stdout, random);
         return;
     }
     if (std.mem.eql(u8, "debug", command)) {
