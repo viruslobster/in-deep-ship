@@ -3,13 +3,6 @@ const Battleship = @import("battleship.zig");
 
 const Who = enum { you, enemy };
 
-pub const Placement = struct {
-    size: u8,
-    orientation: Battleship.Orientation,
-    x: usize,
-    y: usize,
-};
-
 pub const Shot = union(enum) {
     miss: void,
     hit: void,
@@ -20,7 +13,7 @@ pub const Message = union(enum) {
     round_start: void,
     game_start: void,
     place_ships_request: void,
-    place_ships_response: []const Placement,
+    place_ships_response: []const Battleship.Placement,
     turn_request: void,
     turn_response: struct {
         x: usize,
@@ -50,7 +43,7 @@ pub const Message = union(enum) {
                 return .{ .place_ships_request = {} };
             }
             // place-ships;3;horizontal;A0;4;vertical;J9\n
-            var placements = try std.ArrayList(Placement).initCapacity(gpa, 5);
+            var placements = try std.ArrayList(Battleship.Placement).initCapacity(gpa, 5);
             while (true) {
                 const size_bytes = parts.next() orelse return error.TooFewParts;
                 const orientation_bytes = parts.next() orelse return error.TooFewParts;
@@ -65,11 +58,12 @@ pub const Message = union(enum) {
                     else
                         return error.Format;
 
-                const placement = Placement{
+                const y = std.mem.indexOf(u8, std.ascii.uppercase, cord_bytes[0..1]) orelse return error.Format;
+                const placement = Battleship.Placement{
                     .size = try std.fmt.parseInt(u8, size_bytes, 10),
                     .orientation = orientation,
-                    .x = try std.fmt.parseInt(usize, cord_bytes[1..], 10),
-                    .y = std.mem.indexOf(u8, std.ascii.uppercase, cord_bytes[0..1]) orelse return error.Format,
+                    .x = try std.fmt.parseInt(u16, cord_bytes[1..], 10),
+                    .y = @intCast(y),
                 };
                 try placements.append(gpa, placement);
                 if (parts.peek() == null) break;
@@ -190,7 +184,7 @@ test "message-format" {
     }
     {
         var sink = std.Io.Writer.fixed(&buffer);
-        const placements = [_]Placement{
+        const placements = [_]Battleship.Placement{
             .{ .size = 3, .orientation = .Horizontal, .x = 0, .y = 0 },
             .{ .size = 4, .orientation = .Vertical, .x = 9, .y = 9 },
         };
@@ -277,11 +271,11 @@ test "message-parse" {
         try std.testing.expectEqual(result.place_ships_response.len, 2);
         try std.testing.expectEqual(
             result.place_ships_response[0],
-            Placement{ .size = 3, .orientation = .Horizontal, .x = 0, .y = 0 },
+            Battleship.Placement{ .size = 3, .orientation = .Horizontal, .x = 0, .y = 0 },
         );
         try std.testing.expectEqual(
             result.place_ships_response[1],
-            Placement{ .size = 4, .orientation = .Vertical, .x = 9, .y = 9 },
+            Battleship.Placement{ .size = 4, .orientation = .Vertical, .x = 9, .y = 9 },
         );
     }
     {

@@ -1,5 +1,5 @@
 .{
-    .name = "Random Ralph",
+    .name = "Unpredictable Ulga",
     .runnable = "src/main.py",
     .img = "assets/ralph.jpg",
     .emote = "assets/kaboom.mp3",

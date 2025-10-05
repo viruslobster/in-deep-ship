@@ -5,14 +5,9 @@ pub fn Board(width: usize, height: usize, ships: []const Ship) type {
     const ship_len = ships.len;
     return struct {
         const Self = @This();
-        const Cell = struct {
-            // index into `ships`
-            ship_idx: ?usize = null,
-            hit: bool = false,
-        };
 
         ships: [ship_len]Ship,
-        placed: [ship_len]bool,
+        placements: [ship_len]?Placement,
         cells: [board_len]Cell,
         width: usize,
         height: usize,
@@ -25,7 +20,17 @@ pub fn Board(width: usize, height: usize, ships: []const Ship) type {
                 .cells = cells,
                 .width = width,
                 .height = height,
-                .placed = [_]bool{false} ** ship_len,
+                .placements = .{null} ** ship_len,
+            };
+        }
+
+        pub fn interface(self: *Self) BoardInterface {
+            return .{
+                .ships = &self.ships,
+                .placements = &self.placements,
+                .cells = &self.cells,
+                .width = self.width,
+                .height = self.height,
             };
         }
 
@@ -39,37 +44,31 @@ pub fn Board(width: usize, height: usize, ships: []const Ship) type {
         }
 
         pub fn allPlaced(self: *Self) bool {
-            for (&self.placed) |placed| if (!placed) return false;
+            for (&self.placements) |p| if (p == null) return false;
             return true;
         }
 
         /// If placement is invalid board state may be dirty
-        pub fn place(
-            self: *Self,
-            size: u8,
-            origin_x: usize,
-            origin_y: usize,
-            orientation: Orientation,
-        ) !void {
-            if (origin_x >= self.width or origin_y >= self.height) return error.OutOfBounds;
+        pub fn place(self: *Self, placement: Placement) !void {
+            if (placement.x >= self.width or placement.y >= self.height)
+                return error.OutOfBounds;
 
             const idx = for (0..self.ships.len) |i| {
-                if (self.ships[i].size == size and !self.placed[i]) break i;
+                if (self.ships[i].size == placement.size and self.placements[i] == null)
+                    break i;
             } else {
                 return error.NoUnplacedShip;
             };
-            self.placed[idx] = true;
+            self.placements[idx] = placement;
 
-            for (0..size) |i| {
-                const cell = switch (orientation) {
-                    .Horizontal => self.at_ptr(origin_x + i, origin_y),
-                    .Vertical => self.at_ptr(origin_x, origin_y + i),
+            for (0..placement.size) |i| {
+                const cell = switch (placement.orientation) {
+                    .Horizontal => self.at_ptr(placement.x + i, placement.y),
+                    .Vertical => self.at_ptr(placement.x, placement.y + i),
                 } catch {
-                    std.log.err("{d}, {d}, {d}, {f}, {d}", .{ size, origin_x, origin_y, orientation, i });
-
+                    std.log.err("ship does not fit: {any}", .{placement});
                     return error.ShipDoesNotFit;
                 };
-
                 if (cell.ship_idx) |id| {
                     std.log.err("Overlap: {any}", .{self.ships[id]});
                     return error.ShipDoesNotFit;
@@ -141,43 +140,22 @@ pub fn Board(width: usize, height: usize, ships: []const Ship) type {
                 try sink.print("\n", .{});
             }
         }
-
-        pub fn format_radar(self: Self, sink: *std.Io.Writer) !void {
-            // 0 1 2 3 4... header
-            try sink.writeAll("   ");
-            for (0..self.width) |i| {
-                try sink.print("{d}  ", .{i});
-            }
-            try sink.writeByte('\n');
-
-            for (0..self.height) |y| {
-                try sink.print("{c} ", .{std.ascii.uppercase[y]});
-                for (0..self.width) |x| {
-                    const cell = self.at(x, y) catch unreachable;
-                    const cell_ship = if (cell.ship_idx) |idx| &self.ships[idx] else null;
-
-                    if (cell.hit and cell_ship != null) {
-                        const ship = cell_ship orelse unreachable;
-                        if (ship.hits >= ship.size) {
-                            try csiColor(sink, 41);
-                            try sink.print("{}{}", .{ ship.size, ship.size });
-                        } else {
-                            try csiColor(sink, 43);
-                            try sink.print("XX", .{});
-                        }
-                        try csiColor(sink, null);
-                        try sink.print(" ", .{});
-                        continue;
-                    }
-                    try csiColor(sink, null);
-                    const char: u8 = if (cell.hit) 'X' else '?';
-                    try sink.print("{c}{c} ", .{ char, char });
-                }
-                try sink.print("\n", .{});
-            }
-        }
     };
 }
+
+pub const BoardInterface = struct {
+    ships: []Ship,
+    placements: []?Placement,
+    cells: []Cell,
+    width: usize,
+    height: usize,
+};
+
+const Cell = struct {
+    // index into `ships`
+    ship_idx: ?usize = null,
+    hit: bool = false,
+};
 
 pub const Ship = struct {
     size: u8,
@@ -222,3 +200,10 @@ fn csiColor(sink: *std.Io.Writer, value: ?u16) !void {
     }
     try sink.print("\x1b[m", .{});
 }
+
+pub const Placement = struct {
+    size: u8,
+    orientation: Orientation,
+    x: u16,
+    y: u16,
+};
