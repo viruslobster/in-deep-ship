@@ -1,4 +1,5 @@
 const std = @import("std");
+const Resource = @import("resource.zig");
 
 const Self = @This();
 stdout: *std.Io.Writer,
@@ -7,7 +8,7 @@ pub fn init(stdout: *std.Io.Writer) Self {
     return .{ .stdout = stdout };
 }
 
-const DrawImageOptions = struct {
+pub const DrawImageOptions = struct {
     action: enum(u8) {
         transmit = 't',
         transmit_display = 'T',
@@ -60,14 +61,34 @@ pub fn imageBytes(self: *Self, bytes: []u8, opts: DrawImageOptions) !void {
     try self.stdout.print("\x1b\\\n", .{});
 }
 
-pub fn imagePos(self: *Self, row: u16, col: u16, opts: DrawImageOptions) !void {
+pub fn imagePos(self: *Self, col: u16, row: u16, opts: DrawImageOptions) !void {
     try self.setCursor(.{ .row = row, .col = col });
     try self.imageHeader(opts);
     try self.stdout.print("\x1b\\\n", .{});
 }
+
 pub fn image(self: *Self, opts: DrawImageOptions) !void {
     try self.imageHeader(opts);
     try self.stdout.print("\x1b\\\n", .{});
+}
+
+pub fn drawRes(self: *Self, row: u16, col: u16, res: *Resource) !void {
+    try self.imagePos(
+        row,
+        col,
+        .{
+            .action = .put,
+            .image_id = res.image_file.id(),
+            .rows = res.rows,
+            .cols = res.cols,
+            .source_rect = .{
+                .x = res.frames[0].x,
+                .y = res.frames[0].y,
+                .w = res.frames[0].w,
+                .h = res.frames[0].h,
+            },
+        },
+    );
 }
 
 const Cursor = struct { row: u16, col: u16 };
@@ -87,4 +108,3 @@ pub fn hideCursor(self: *Self) !void {
 pub fn showCursor(self: *Self) !void {
     try self.stdout.print("\x1b[?25h", .{});
 }
-

@@ -3,7 +3,7 @@ const Battleship = @import("battleship.zig");
 const Protocol = @import("protocol.zig");
 const Meta = @import("meta.zig");
 const Graphics = @import("graphics.zig");
-const Resource = @import("resource.zig");
+const R = @import("resource.zig");
 
 const game_ships: [5]Battleship.Ship = .{
     .{ .size = 5 },
@@ -73,7 +73,7 @@ const Game = struct {
     fn placeShips(
         self: *Game,
         player_id: usize,
-        placements: []const Protocol.Placement,
+        placements: []const Battleship.Placement,
     ) !void {
         const player = &self.players[player_id];
         const board = &self.boards[player_id];
@@ -120,23 +120,18 @@ fn protocolShot(shot: Battleship.Shot) Protocol.Shot {
 
 fn placeIfValid(
     board: *BattleshipBoard,
-    placements: []const Protocol.Placement,
+    placements: []const Battleship.Placement,
 ) !void {
     const empty_board = BattleshipBoard.init();
     if (!std.meta.eql(board.*, empty_board)) return error.BoardDirty;
 
     for (placements) |placement| {
-        board.place(
-            placement.size,
-            placement.x,
-            placement.y,
-            placement.orientation,
-        ) catch |err| {
+        board.place(placement) catch |err| {
             board.* = empty_board;
             return err;
         };
     }
-    for (&board.placed) |placed| if (!placed) return error.NotAllShipsPlaced;
+    if (!board.allPlaced()) return error.NotAllShipsPlaced;
 }
 
 pub const Player = struct {
@@ -222,13 +217,37 @@ fn play(
     stdout: *std.Io.Writer,
     random: std.Random,
 ) !void {
-    var g = Graphics.init(stdout);
     _ = stdin;
     _ = random;
+
+    var g = Graphics.init(stdout);
+    const ship_bytes = try R.load(gpa, .ship);
+    try g.imageBytes(
+        ship_bytes,
+        .{ .image_id = R.ImageFile.ship.id(), .action = .transmit },
+    );
+    gpa.free(ship_bytes);
+
+    const explosion_bytes = try R.load(gpa, .explosion);
+    try g.imageBytes(
+        explosion_bytes,
+        .{
+            .image_id = R.ImageFile.explosion.id(),
+            .action = .transmit,
+        },
+    );
+    gpa.free(explosion_bytes);
 
     try g.hideCursor();
     try g.setCursor(.{ .row = 0, .col = 0 });
     try g.eraseBelowCursor();
+
+    var board = BattleshipBoard.init();
+    try board.place(.{ .size = 5, .x = 0, .y = 0, .orientation = .Horizontal });
+    try board.place(.{ .size = 4, .x = 0, .y = 1, .orientation = .Horizontal });
+    try board.place(.{ .size = 3, .x = 5, .y = 2, .orientation = .Vertical });
+    try board.place(.{ .size = 3, .x = 0, .y = 3, .orientation = .Horizontal });
+    try board.place(.{ .size = 2, .x = 0, .y = 4, .orientation = .Horizontal });
 
     const grid =
         \\     0     1     2     3     4     5     6     7     8     9    10
@@ -262,36 +281,33 @@ fn play(
         \\  ╰─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────╯
     ;
     try stdout.print("{s}\n", .{grid});
-    try stdout.flush();
-    std.Thread.sleep(1000 * std.time.ns_per_ms);
 
-    const ship_bytes = try Resource.ship.load(gpa);
-    try g.imageBytes(
-        ship_bytes,
-        .{ .image_id = Resource.ship.id(), .action = .transmit },
-    );
-    gpa.free(ship_bytes);
+    const horizontal_ships = [_]R{
+        R.carrier_horizontal,
+        R.battleship_horizontal,
+        R.cruiser_horizontal,
+        R.submarine_horizontal,
+        R.destroyer_horizontal,
+    };
+    const vertical_ships = [_]R{
+        R.carrier_vertical,
+        R.battleship_vertical,
+        R.cruiser_vertical,
+        R.submarine_vertical,
+        R.destroyer_vertical,
+    };
+    for (0..board.placements.len) |i| {
+        const placement = board.placements[i] orelse continue;
+        std.log.err("placement = {any}", .{i});
+        const x = 4 + placement.x * 6;
+        const y = 3 + placement.y * 3;
+        const res = switch (placement.orientation) {
+            .Horizontal => horizontal_ships[i],
+            .Vertical => vertical_ships[i],
+        };
+        try g.imagePos(@intCast(x), y, res.drawOptions());
+    }
 
-    const explosion_bytes = try Resource.explosion.load(gpa);
-    try g.imageBytes(
-        explosion_bytes,
-        .{
-            .image_id = Resource.explosion.id(),
-            .action = .transmit,
-        },
-    );
-    gpa.free(explosion_bytes);
-
-    try g.imagePos(
-        6,
-        4,
-        .{
-            .action = .put,
-            .image_id = Resource.ship.id(),
-            .rows = 2,
-            .cols = 10,
-        },
-    );
     try stdout.flush();
 
     for (0..5) |j| {
@@ -300,11 +316,11 @@ fn play(
         for (0..10) |i| {
             const i_u32: u32 = @intCast(i);
             try g.imagePos(
-                15,
                 20,
+                15,
                 .{
                     .action = .put,
-                    .image_id = Resource.explosion.id(),
+                    .image_id = R.ImageFile.explosion.id(),
                     .placement_id = 1,
                     .source_rect = .{
                         .x = 100 * i_u32,
