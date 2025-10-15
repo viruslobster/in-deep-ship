@@ -4,6 +4,7 @@ const Protocol = @import("protocol.zig");
 const Meta = @import("meta.zig");
 const Graphics = @import("graphics.zig");
 const R = @import("resource.zig");
+const Layout = @import("layout.zig");
 
 const game_ships: [5]Battleship.Ship = .{
     .{ .size = 5 },
@@ -249,6 +250,9 @@ fn play(
     try board.place(.{ .size = 3, .x = 0, .y = 3, .orientation = .Horizontal });
     try board.place(.{ .size = 2, .x = 0, .y = 4, .orientation = .Horizontal });
 
+    var column = try Layout.Column.init(gpa, 100, 100);
+    const col_writer = &column.interface;
+
     const grid =
         \\     0     1     2     3     4     5     6     7     8     9    10
         \\  ╭─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────╮
@@ -280,7 +284,9 @@ fn play(
         \\  │     │     │     │     │     │     │     │     │     │     │     │
         \\  ╰─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────╯
     ;
-    try stdout.print("{s}\n", .{grid});
+    try col_writer.print("{s}\n", .{grid});
+    try col_writer.flush();
+    try Layout.write(&.{ &column, &column }, stdout);
 
     const horizontal_ships = [_]R{
         R.carrier_horizontal,
