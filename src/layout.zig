@@ -1,10 +1,29 @@
 const std = @import("std");
+const Self = @This();
+columns: []const *Column,
 
-pub fn write(columns: []const *Column, sink: *std.Io.Writer) !void {
-    for (0..columns[0].rows.items.len) |row_idx| {
-        for (columns) |column| {
-            const row = column.rows.items[row_idx];
-            try sink.writeAll(row.items);
+pub fn init(columns: []const *Column) Self {
+    return .{ .columns = columns };
+}
+
+pub fn format(self: *const Self, sink: *std.Io.Writer) !void {
+    var max_rows: usize = 0;
+    for (self.columns) |column| max_rows = @max(max_rows, column.rows.items.len);
+
+    for (0..max_rows) |row_idx| {
+        for (self.columns) |column| {
+            var wrote: usize = 0;
+            if (row_idx < column.rows.items.len) {
+                const row = column.rows.items[row_idx];
+                try sink.writeAll(row.items);
+                wrote = std.unicode.utf8CountCodepoints(row.items) catch row.items.len;
+                std.log.info("wrote({d}): {s}", .{ wrote, row.items });
+            }
+            // Pad everything to max_row_len for constant column width
+            const remaining = column.max_row_len - wrote;
+            std.log.info("remaining: {d}", .{remaining});
+            if (remaining > 0)
+                try sink.splatByteAll(' ', remaining);
         }
         try sink.writeByte('\n');
     }
@@ -16,7 +35,7 @@ pub const Column = struct {
     cols_hint: u32,
     gpa: std.mem.Allocator,
     err: ?Error = null,
-    // TODO: max_row_len
+    max_row_len: usize = 0,
 
     pub fn init(gpa: std.mem.Allocator, rows_hint: u32, cols_hint: u32) !Column {
         var rows = try std.ArrayList(std.ArrayList(u8)).initCapacity(gpa, rows_hint);
@@ -54,6 +73,12 @@ pub const Column = struct {
                     self.err = Error.OutOfMemory;
                     return std.Io.Writer.Error.WriteFailed;
                 };
+                // This will fail if the bytes aren't valid utf8. Could happen
+                // between writes
+                const maybe_row_len = std.unicode.utf8CountCodepoints(row.items) catch null;
+                if (maybe_row_len) |row_len| {
+                    self.max_row_len = @max(self.max_row_len, row_len);
+                }
             },
         }
     }
