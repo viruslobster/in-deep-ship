@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const Meta = @import("meta.zig");
+const View = @import("view.zig");
 const Tournament = @import("tournament.zig");
 
 fn help(stderr: *std.Io.Writer) !void {
@@ -44,14 +45,6 @@ pub fn main() !void {
     const base_dir = try std.posix.getcwd(&base_dir_buf);
     const entries_path = try Meta.join_path(base_dir, "entries", &entries_buf);
     const entries = try Meta.parse(gpa, entries_path);
-    var tournament: Tournament = .{
-        .gpa = gpa,
-        .stdin = stdin,
-        .stdout = stdout,
-        .random = random,
-        .entries = entries,
-        .cwd = base_dir,
-    };
 
     var args = std.process.args();
     // Skip binary file path
@@ -63,34 +56,45 @@ pub fn main() !void {
         try help(stderr);
         return;
     };
-    if (std.mem.eql(u8, "play", command)) {
-        tournament.play() catch |err| switch (err) {
-            error.WindowTooSmall => {
-                std.log.err("Window is too small or font size is too big to render game", .{});
-                std.process.exit(1);
-            },
-            else => return err,
-        };
-        //var kitty = View.Kitty.init(stdout);
-        // try play(std.heap.page_allocator, stdin, stdout, random, entries, .{ .kitty = &kitty });
-        return;
-    }
-    if (std.mem.eql(u8, "debug", command)) {
-        const name0 = args.next();
-        const name1 = args.next();
-        if (name0 == null or name1 == null) {
-            try helpDebug(stderr);
-            return;
-        }
-        try tournament.debug(
-            name0 orelse unreachable,
-            name1 orelse unreachable,
-        );
-        return;
-    }
-    try help(stderr);
+    const mode: View.Mode = if (std.mem.eql(u8, "play", command))
+        .kitty
+    else if (std.mem.eql(u8, "debug", command))
+        .debug
+    else {
+        try help(stderr);
+        std.process.exit(1);
+    };
+    var kitty_view: View.Kitty = undefined;
+    var debug_view: View.Debug = undefined;
+    const view: View.Interface = switch (mode) {
+        .kitty => blk: {
+            kitty_view = View.Kitty.init(stdout);
+            break :blk .{ .kitty = &kitty_view };
+        },
+        .debug => blk: {
+            debug_view = View.Debug.init(stdout);
+            break :blk .{ .debug = &debug_view };
+        },
+    };
+    var tournament: Tournament = .{
+        .gpa = gpa,
+        .stdin = stdin,
+        .stdout = stdout,
+        .random = random,
+        .entries = entries,
+        .cwd = base_dir,
+    };
+    tournament.play(view) catch |err| switch (err) {
+        error.WindowTooSmall => {
+            std.log.err("Window is too small or font size is too big to render game", .{});
+            std.process.exit(1);
+        },
+        else => return err,
+    };
 }
 
 test {
     std.testing.refAllDeclsRecursive(Meta);
+    const R = @import("resource.zig");
+    std.testing.refAllDeclsRecursive(R);
 }

@@ -3,11 +3,9 @@ const Resource = @import("resource.zig");
 
 const Self = @This();
 stdout: *std.Io.Writer,
-tty: std.posix.fd_t,
 
-pub fn init(stdout: *std.Io.Writer) !Self {
-    const tty = try std.posix.open("/dev/tty", .{ .ACCMODE = .RDWR }, 0);
-    return .{ .stdout = stdout, .tty = tty };
+pub fn init(stdout: *std.Io.Writer) Self {
+    return .{ .stdout = stdout };
 }
 
 pub const ImageOptions = struct {

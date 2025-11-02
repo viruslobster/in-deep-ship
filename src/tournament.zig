@@ -25,9 +25,11 @@ const game_ships: [5]Battleship.Ship = .{
 const game_width = 11;
 const game_height = 9;
 const BattleshipBoard = Battleship.Board(game_width, game_height, &game_ships);
-const Game = struct {
+pub const Game = struct {
+    entries: [2]*const Meta.Entry,
     players: [2]Player,
     boards: [2]BattleshipBoard,
+    // TODO: we don't need this
     radars: [2]BattleshipBoard,
     penalties: [2]u32,
 
@@ -37,6 +39,7 @@ const Game = struct {
             BattleshipBoard.init(),
         };
         return .{
+            .entries = [2]*const Meta.Entry{ entry0, entry1 },
             .players = [2]Player{
                 Player.init(entry0, gpa),
                 Player.init(entry1, gpa),
@@ -230,34 +233,31 @@ pub const Player = struct {
     }
 };
 
-pub fn play(
-    self: *Self,
-) !void {
-    var kitty = View.Kitty.init(self.stdout);
-    var view: View.View = .{ .kitty = &kitty };
-    var g = try Graphics.init(self.stdout);
+pub fn play(self: *Self, view: View.Interface) !void {
+    try view.alloc(self.gpa);
+    var g = Graphics.init(self.stdout);
     // Clear any previous images
     try g.image(.{ .action = .delete });
 
-    var board0 = BattleshipBoard.init();
-    try board0.place(.{ .size = 5, .x = 0, .y = 0, .orientation = .Horizontal });
-    try board0.place(.{ .size = 4, .x = 0, .y = 1, .orientation = .Horizontal });
-    try board0.place(.{ .size = 3, .x = 5, .y = 2, .orientation = .Vertical });
-    try board0.place(.{ .size = 3, .x = 0, .y = 3, .orientation = .Horizontal });
-    try board0.place(.{ .size = 2, .x = 0, .y = 4, .orientation = .Horizontal });
+    var arena_allocator = std.heap.ArenaAllocator.init(self.gpa);
+    defer arena_allocator.deinit();
 
-    var board1 = BattleshipBoard.init();
-    try board1.place(.{ .size = 5, .x = 0, .y = 8, .orientation = .Horizontal });
-    try board1.place(.{ .size = 4, .x = 7, .y = 1, .orientation = .Vertical });
-    try board1.place(.{ .size = 3, .x = 5, .y = 2, .orientation = .Vertical });
-    try board1.place(.{ .size = 3, .x = 0, .y = 3, .orientation = .Horizontal });
-    try board1.place(.{ .size = 2, .x = 0, .y = 4, .orientation = .Horizontal });
-
-    try view.alloc(self.gpa);
+    // TODO: don't just use the first two entries
+    var game = Game.init(arena_allocator.allocator(), &self.entries[0], &self.entries[1]);
+    defer game.deinit();
+    try game.startRound();
+    try view.startRound(&game);
+    var wins = [2]u8{ 0, 0 };
+    for (0..3) |_| {
+        const winner_id = try playGame(&game, view, &arena_allocator);
+        try view.finishGame(winner_id, &game);
+        wins[winner_id] += 1;
+        _ = arena_allocator.reset(.retain_capacity);
+    }
     try view.draw(
         self.gpa,
-        board0.interface(),
-        board1.interface(),
+        game.boards[0].interface(),
+        game.boards[1].interface(),
     );
     try g.setCursor(.{ .row = 45, .col = 1 });
 }
@@ -267,7 +267,7 @@ pub fn debug(
     name0: []const u8,
     name1: []const u8,
 ) !void {
-    var g = try Graphics.init(self.stdout);
+    var g = Graphics.init(self.stdout);
     var arena_allocator = std.heap.ArenaAllocator.init(self.gpa);
     defer arena_allocator.deinit();
 
@@ -297,7 +297,7 @@ pub fn debug(
 }
 
 /// Returns the id of the winning player
-fn playGame(game: *Game, g: *Graphics, arena_alloc: *std.heap.ArenaAllocator) !usize {
+fn playGame(game: *Game, view: View.Interface, arena_alloc: *std.heap.ArenaAllocator) !usize {
     std.log.debug("Starting game", .{});
     try game.resetState();
 
@@ -307,7 +307,6 @@ fn playGame(game: *Game, g: *Graphics, arena_alloc: *std.heap.ArenaAllocator) !u
     }
 
     std.log.debug("Placing ships...", .{});
-    // Place ships
     var player_id: usize = 0;
     while (true) {
         player_id = (player_id + 1) % 2;
@@ -335,12 +334,7 @@ fn playGame(game: *Game, g: *Graphics, arena_alloc: *std.heap.ArenaAllocator) !u
     // TODO: randomize player_id
     while (true) {
         try playGameTurn(game, player_id);
-
-        try g.setCursor(.{ .row = 0, .col = 0 });
-        try g.eraseBelowCursor();
-        try g.stdout.print("Player 0: \n{f}", .{game.boards[0]});
-        try g.stdout.print("Player 1: \n{f}", .{game.boards[1]});
-        try g.stdout.flush();
+        try view.boards(game);
 
         if (game.boards[0].allSunk()) {
             try game.players[0].writeMessage(.{ .lose = {} });

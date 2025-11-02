@@ -8,12 +8,13 @@ pub fn init(columns: []const *Column) Self {
 
 pub fn format(self: *const Self, sink: *std.Io.Writer) !void {
     var max_rows: usize = 0;
-    for (self.columns) |column| max_rows = @max(max_rows, column.rows.items.len);
+    // TODO: column.row_idx + 1 should be a function like column.len_rows()
+    for (self.columns) |column| max_rows = @max(max_rows, column.row_idx + 1);
 
     for (0..max_rows) |row_idx| {
         for (self.columns) |column| {
             var wrote: usize = 0;
-            if (row_idx < column.rows.items.len) {
+            if (row_idx < column.row_idx + 1) {
                 const row = column.rows.items[row_idx];
                 try sink.writeAll(row.items);
                 wrote = std.unicode.utf8CountCodepoints(row.items) catch row.items.len;
@@ -162,7 +163,7 @@ pub const Column = struct {
     }
 
     pub fn format(self: *const Column, sink: *std.Io.Writer) !void {
-        for (0..self.rows.items.len) |i| {
+        for (0..self.row_idx + 1) |i| {
             const row = self.rows.items[i];
             try sink.writeAll(row.items);
             if (i < self.rows.items.len - 1) try sink.writeByte('\n');

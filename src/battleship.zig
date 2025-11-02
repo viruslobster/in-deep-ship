@@ -24,7 +24,7 @@ pub fn Board(width: usize, height: usize, ships: []const Ship) type {
             };
         }
 
-        pub fn interface(self: *Self) BoardInterface {
+        pub fn interface(self: *const Self) BoardInterface {
             return .{
                 .ships = &self.ships,
                 .placements = &self.placements,
@@ -144,9 +144,9 @@ pub fn Board(width: usize, height: usize, ships: []const Ship) type {
 }
 
 pub const BoardInterface = struct {
-    ships: []Ship,
-    placements: []?Placement,
-    cells: []Cell,
+    ships: []const Ship,
+    placements: []const ?Placement,
+    cells: []const Cell,
     width: usize,
     height: usize,
 };

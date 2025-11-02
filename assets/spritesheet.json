@@ -1,0 +1,555 @@
+{
+  "frames": {
+    "battleship-horizontal": {
+      "frame": {
+        "x": 1,
+        "y": 1,
+        "w": 336,
+        "h": 126
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 336,
+        "h": 126
+      },
+      "sourceSize": {
+        "w": 336,
+        "h": 126
+      }
+    },
+    "battleship-horizontal-sunk": {
+      "frame": {
+        "x": 339,
+        "y": 1,
+        "w": 336,
+        "h": 136
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 336,
+        "h": 136
+      },
+      "sourceSize": {
+        "w": 336,
+        "h": 136
+      }
+    },
+    "battleship-small-og": {
+      "frame": {
+        "x": 677,
+        "y": 1,
+        "w": 84,
+        "h": 84
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 84,
+        "h": 84
+      },
+      "sourceSize": {
+        "w": 84,
+        "h": 84
+      }
+    },
+    "battleship-sunk-small-og": {
+      "frame": {
+        "x": 763,
+        "y": 1,
+        "w": 84,
+        "h": 84
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 84,
+        "h": 84
+      },
+      "sourceSize": {
+        "w": 84,
+        "h": 84
+      }
+    },
+    "battleship-vertical": {
+      "frame": {
+        "x": 677,
+        "y": 87,
+        "w": 126,
+        "h": 336
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 126,
+        "h": 336
+      },
+      "sourceSize": {
+        "w": 126,
+        "h": 336
+      }
+    },
+    "battleship-vertical-sunk": {
+      "frame": {
+        "x": 1,
+        "y": 425,
+        "w": 136,
+        "h": 336
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 136,
+        "h": 336
+      },
+      "sourceSize": {
+        "w": 136,
+        "h": 336
+      }
+    },
+    "carrier-horizontal": {
+      "frame": {
+        "x": 1,
+        "y": 139,
+        "w": 420,
+        "h": 114
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 420,
+        "h": 114
+      },
+      "sourceSize": {
+        "w": 420,
+        "h": 114
+      }
+    },
+    "carrier-horizontal-sunk": {
+      "frame": {
+        "x": 139,
+        "y": 425,
+        "w": 420,
+        "h": 114
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 420,
+        "h": 114
+      },
+      "sourceSize": {
+        "w": 420,
+        "h": 114
+      }
+    },
+    "carrier-small-og": {
+      "frame": {
+        "x": 561,
+        "y": 425,
+        "w": 84,
+        "h": 84
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 84,
+        "h": 84
+      },
+      "sourceSize": {
+        "w": 84,
+        "h": 84
+      }
+    },
+    "carrier-sunk-small-og": {
+      "frame": {
+        "x": 647,
+        "y": 425,
+        "w": 84,
+        "h": 84
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 84,
+        "h": 84
+      },
+      "sourceSize": {
+        "w": 84,
+        "h": 84
+      }
+    },
+    "carrier-vertical": {
+      "frame": {
+        "x": 733,
+        "y": 425,
+        "w": 114,
+        "h": 420
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 114,
+        "h": 420
+      },
+      "sourceSize": {
+        "w": 114,
+        "h": 420
+      }
+    },
+    "carrier-vertical-sunk": {
+      "frame": {
+        "x": 849,
+        "y": 1,
+        "w": 114,
+        "h": 420
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 114,
+        "h": 420
+      },
+      "sourceSize": {
+        "w": 114,
+        "h": 420
+      }
+    },
+    "cruiser-horizontal": {
+      "frame": {
+        "x": 1,
+        "y": 847,
+        "w": 249,
+        "h": 114
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 249,
+        "h": 114
+      },
+      "sourceSize": {
+        "w": 249,
+        "h": 114
+      }
+    },
+    "cruiser-horizontal-sunk": {
+      "frame": {
+        "x": 252,
+        "y": 847,
+        "w": 249,
+        "h": 100
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 249,
+        "h": 100
+      },
+      "sourceSize": {
+        "w": 249,
+        "h": 100
+      }
+    },
+    "cruiser-small-og": {
+      "frame": {
+        "x": 849,
+        "y": 423,
+        "w": 84,
+        "h": 84
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 84,
+        "h": 84
+      },
+      "sourceSize": {
+        "w": 84,
+        "h": 84
+      }
+    },
+    "cruiser-sunk-small-og": {
+      "frame": {
+        "x": 849,
+        "y": 509,
+        "w": 84,
+        "h": 84
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 84,
+        "h": 84
+      },
+      "sourceSize": {
+        "w": 84,
+        "h": 84
+      }
+    },
+    "cruiser-vertical": {
+      "frame": {
+        "x": 139,
+        "y": 595,
+        "w": 114,
+        "h": 249
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 114,
+        "h": 249
+      },
+      "sourceSize": {
+        "w": 114,
+        "h": 249
+      }
+    },
+    "cruiser-vertical-sunk": {
+      "frame": {
+        "x": 255,
+        "y": 595,
+        "w": 100,
+        "h": 249
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 100,
+        "h": 249
+      },
+      "sourceSize": {
+        "w": 100,
+        "h": 249
+      }
+    },
+    "destroyer-horizontal": {
+      "frame": {
+        "x": 357,
+        "y": 595,
+        "w": 166,
+        "h": 136
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 166,
+        "h": 136
+      },
+      "sourceSize": {
+        "w": 166,
+        "h": 136
+      }
+    },
+    "destroyer-horizontal-sunk": {
+      "frame": {
+        "x": 525,
+        "y": 595,
+        "w": 166,
+        "h": 136
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 166,
+        "h": 136
+      },
+      "sourceSize": {
+        "w": 166,
+        "h": 136
+      }
+    },
+    "destroyer-small-og": {
+      "frame": {
+        "x": 849,
+        "y": 595,
+        "w": 84,
+        "h": 84
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 84,
+        "h": 84
+      },
+      "sourceSize": {
+        "w": 84,
+        "h": 84
+      }
+    },
+    "destroyer-sunk-small-og": {
+      "frame": {
+        "x": 849,
+        "y": 681,
+        "w": 84,
+        "h": 84
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 84,
+        "h": 84
+      },
+      "sourceSize": {
+        "w": 84,
+        "h": 84
+      }
+    },
+    "destroyer-vertical": {
+      "frame": {
+        "x": 503,
+        "y": 767,
+        "w": 136,
+        "h": 166
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 136,
+        "h": 166
+      },
+      "sourceSize": {
+        "w": 136,
+        "h": 166
+      }
+    },
+    "destroyer-vertical-sunk": {
+      "frame": {
+        "x": 849,
+        "y": 767,
+        "w": 136,
+        "h": 166
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 136,
+        "h": 166
+      },
+      "sourceSize": {
+        "w": 136,
+        "h": 166
+      }
+    },
+    "submarine-horizontal": {
+      "frame": {
+        "x": 503,
+        "y": 935,
+        "w": 249,
+        "h": 116
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 249,
+        "h": 116
+      },
+      "sourceSize": {
+        "w": 249,
+        "h": 116
+      }
+    },
+    "submarine-horizontal-sunk": {
+      "frame": {
+        "x": 1,
+        "y": 1053,
+        "w": 249,
+        "h": 116
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 249,
+        "h": 116
+      },
+      "sourceSize": {
+        "w": 249,
+        "h": 116
+      }
+    },
+    "submarine-small-og": {
+      "frame": {
+        "x": 641,
+        "y": 767,
+        "w": 84,
+        "h": 84
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 84,
+        "h": 84
+      },
+      "sourceSize": {
+        "w": 84,
+        "h": 84
+      }
+    },
+    "submarine-sunk-small-og": {
+      "frame": {
+        "x": 754,
+        "y": 935,
+        "w": 84,
+        "h": 84
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 84,
+        "h": 84
+      },
+      "sourceSize": {
+        "w": 84,
+        "h": 84
+      }
+    },
+    "submarine-vertical": {
+      "frame": {
+        "x": 840,
+        "y": 935,
+        "w": 116,
+        "h": 249
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 116,
+        "h": 249
+      },
+      "sourceSize": {
+        "w": 116,
+        "h": 249
+      }
+    },
+    "submarine-vertical-sunk": {
+      "frame": {
+        "x": 965,
+        "y": 1,
+        "w": 116,
+        "h": 249
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 116,
+        "h": 249
+      },
+      "sourceSize": {
+        "w": 116,
+        "h": 249
+      }
+    }
+  },
+  "meta": {
+    "app": "http://www.codeandweb.com/texturepacker",
+    "version": "1.0",
+    "image": "spritesheet",
+    "format": "RGBA8888",
+    "size": {
+      "w": 1082,
+      "h": 1185
+    },
+    "scale": "1"
+  }
+}

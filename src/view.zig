@@ -4,20 +4,52 @@ const Battleship = @import("battleship.zig");
 const Layout = @import("layout.zig");
 const Graphics = @import("graphics.zig");
 const R = @import("resource.zig");
+const Tournament = @import("tournament.zig");
 
-// TODO: Interface is a better name?
-pub const View = union(enum) {
+pub const Mode = enum {
+    debug,
+    kitty,
+};
+
+pub const Interface = union(Mode) {
+    /// A simple text implementation
     debug: *Debug,
+
+    /// A more involved implementation using the Kitty Graphics protocol
     kitty: *Kitty,
 
-    pub fn alloc(self: View, gpa: std.mem.Allocator) !void {
+    pub fn deinit(self: Interface, gpa: std.mem.Allocator) !void {
+        switch (self) {
+            inline else => |variant| try variant.deinit(gpa),
+        }
+    }
+
+    pub fn alloc(self: Interface, gpa: std.mem.Allocator) !void {
         switch (self) {
             inline else => |variant| try variant.alloc(gpa),
         }
     }
 
+    pub fn startRound(self: Interface, game: *const Tournament.Game) !void {
+        switch (self) {
+            inline else => |variant| try variant.startRound(game),
+        }
+    }
+
+    pub fn finishGame(self: Interface, winner_id: usize, game: *const Tournament.Game) !void {
+        switch (self) {
+            inline else => |variant| try variant.finishGame(winner_id, game),
+        }
+    }
+
+    pub fn boards(self: Interface, game: *const Tournament.Game) !void {
+        switch (self) {
+            inline else => |variant| try variant.boards(game),
+        }
+    }
+
     pub fn draw(
-        self: View,
+        self: Interface,
         gpa: std.mem.Allocator,
         player0: Battleship.BoardInterface,
         player1: Battleship.BoardInterface,
@@ -28,10 +60,44 @@ pub const View = union(enum) {
     }
 };
 
-const Debug = struct {
+pub const Debug = struct {
+    g: Graphics,
+
+    pub fn init(stdout: *std.Io.Writer) Debug {
+        return .{ .g = Graphics.init(stdout) };
+    }
+
+    pub fn deinit(self: *Debug, gpa: std.mem.Allocator) void {
+        _ = self;
+        _ = gpa;
+    }
+
     fn alloc(self: *Debug, gpa: std.mem.Allocator) !void {
         _ = gpa;
         _ = self;
+    }
+
+    fn startRound(self: *Debug, game: *const Tournament.Game) !void {
+        try self.g.setCursor(.{ .row = 0, .col = 0 });
+        try self.g.eraseBelowCursor();
+        try self.g.stdout.print("{s} vs {s}", .{ game.entries[0].name, game.entries[1].name });
+        try self.g.stdout.flush();
+        std.Thread.sleep(1000 * std.time.ns_per_ms);
+    }
+
+    fn finishGame(self: *Debug, winner_id: usize, game: *const Tournament.Game) !void {
+        _ = game;
+        try self.g.stdout.print("Player {d} won!\n", .{winner_id});
+        try self.g.stdout.flush();
+        std.Thread.sleep(1000 * std.time.ns_per_ms);
+    }
+
+    fn boards(self: *Debug, game: *const Tournament.Game) !void {
+        try self.g.setCursor(.{ .row = 0, .col = 0 });
+        try self.g.eraseBelowCursor();
+        try self.g.stdout.print("Player 0: \n{f}", .{game.boards[0]});
+        try self.g.stdout.print("Player 1: \n{f}", .{game.boards[1]});
+        try self.g.stdout.flush();
     }
 
     fn draw(
@@ -48,20 +114,20 @@ const Debug = struct {
 };
 
 pub const Kitty = struct {
-    stdout: *std.Io.Writer,
-    spacer0_col: Layout.Column,
-    spacer1_col: Layout.Column,
-    player0_col: Layout.Column,
-    player1_col: Layout.Column,
+    g: Graphics,
+    spacer0_col: Layout.Column = undefined,
+    spacer1_col: Layout.Column = undefined,
+    player0_col: Layout.Column = undefined,
+    player1_col: Layout.Column = undefined,
 
     pub fn init(stdout: *std.Io.Writer) Kitty {
-        return .{
-            .stdout = stdout,
-            .player0_col = undefined,
-            .player1_col = undefined,
-            .spacer0_col = undefined,
-            .spacer1_col = undefined,
-        };
+        return .{ .g = Graphics.init(stdout) };
+    }
+
+    pub fn deinit(self: *Kitty, gpa: std.mem.Allocator) void {
+        _ = gpa;
+        self.g.showCursor() catch |err| std.log.err("couldn't show cursor: {}", .{err});
+        self.g.stdout.flush() catch |err| std.log.err("flush: {}", .{err});
     }
 
     fn alloc(self: *Kitty, gpa: std.mem.Allocator) !void {
@@ -69,14 +135,16 @@ pub const Kitty = struct {
         defer arena.deinit();
         const arena_alloc = arena.allocator();
 
-        var g = try Graphics.init(self.stdout);
-        const images: []const R.ImageFile = &.{ R.ImageFile.ship, R.ImageFile.explosion, R.ImageFile.ralf };
+        const images: []const R.ImageFile = &.{
+            R.ImageFile.spritesheet,
+            R.ImageFile.ralf,
+        };
         for (images) |img_file| {
             const bytes = R.load(arena_alloc, img_file) catch |err| {
                 std.log.err("load file: {any}", .{img_file});
                 return err;
             };
-            try g.imageBytes(
+            try self.g.imageBytes(
                 bytes,
                 .{ .image_id = img_file.id(), .action = .transmit },
             );
@@ -86,6 +154,108 @@ pub const Kitty = struct {
         self.player1_col = try Layout.Column.init(gpa, 100, 100);
         self.spacer0_col = try Layout.Column.init(gpa, 1, 100);
         self.spacer1_col = try Layout.Column.init(gpa, 1, 100);
+        try self.g.hideCursor();
+        // TODO: disable being able to type
+    }
+
+    fn startRound(self: *Kitty, game: *const Tournament.Game) !void {
+        try self.g.setCursor(.{ .row = 0, .col = 0 });
+        try self.g.eraseBelowCursor();
+        try self.g.stdout.print("{s} vs {s}", .{ game.entries[0].name, game.entries[1].name });
+        try self.g.stdout.flush();
+        std.Thread.sleep(1000 * std.time.ns_per_ms);
+    }
+
+    fn finishGame(self: *Kitty, winner_id: usize, game: *const Tournament.Game) !void {
+        _ = game;
+        try self.g.stdout.print("Player {d} won!\n", .{winner_id});
+        try self.g.stdout.flush();
+        std.Thread.sleep(1000 * std.time.ns_per_ms);
+    }
+
+    fn boards(self: *Kitty, game: *const Tournament.Game) !void {
+        self.spacer0_col.reset();
+        self.spacer1_col.reset();
+        self.player0_col.reset();
+        self.player1_col.reset();
+        try self.g.setCursor(.{ .row = 0, .col = 0 });
+        //try self.g.eraseBelowCursor();
+
+        const winsize = try Graphics.measureScreen();
+        std.log.info("winsize: {any}", .{winsize});
+
+        // Write player columns
+        // TODO: should probably be a function
+        var col_buffer: [256]u8 = undefined;
+        const grid_start: u16 = 11;
+        {
+            var col_writer = self.player0_col.writer(&col_buffer);
+            var col = &col_writer.interface;
+            try col.print("Player: {s}", .{game.entries[0].name});
+            try col.splatByteAll('\n', grid_start);
+            try col.print("{s}\n", .{grid_template});
+            try col.flush();
+        }
+        {
+            var col_writer = self.player1_col.writer(&col_buffer);
+            var col = &col_writer.interface;
+            try col.print("Player: {s}", .{game.entries[1].name});
+            try col.splatByteAll('\n', grid_start);
+            try col.print("{s}\n", .{grid_template});
+            try col.flush();
+        }
+
+        var spacer1_writer = self.spacer1_col.writer(&.{});
+        const spacer1 = &spacer1_writer.interface;
+        try spacer1.splatByteAll(' ', 5);
+
+        const layout = Layout.init(
+            &.{ &self.spacer0_col, &self.player0_col, &self.spacer1_col, &self.player1_col },
+        );
+        var spacer0_writer = self.spacer0_col.writer(&.{});
+        const spacer0 = &spacer0_writer.interface;
+        if (winsize.col < layout.width()) return error.WindowTooSmall;
+
+        const left_margin = (winsize.col - layout.width()) / 2;
+        try spacer0.splatByteAll(' ', left_margin);
+
+        try self.g.stdout.print("{f}", .{layout});
+
+        // Draw contestant pics
+        {
+            const offset_x: u16 = @intCast(layout.offset(0) + 1);
+            const offset_y: u16 = 2;
+            try self.g.imagePos(offset_x, offset_y, R.ralph.imageOptions());
+        }
+        {
+            const offset_x: u16 = @intCast(layout.offset(2) + 1);
+            const offset_y: u16 = 2;
+            try self.g.imagePos(offset_x, offset_y, R.ralph.imageOptions());
+        }
+
+        // Draw ships
+        {
+            const player = game.boards[0].interface();
+            const offset_x: u16 = @intCast(layout.offset(0) + 4);
+            const offset_y: u16 = grid_start + 3;
+            try self.drawPlacements(offset_x, offset_y, player.placements);
+        }
+        {
+            const player = game.boards[1].interface();
+            const offset_x: u16 = @intCast(layout.offset(2) + 4);
+            const offset_y: u16 = grid_start + 3;
+            try self.drawPlacements(offset_x, offset_y, player.placements);
+        }
+        try self.g.stdout.flush();
+
+        std.Thread.sleep(2000 * std.time.ns_per_ms);
+        //try self.sampleAnimation();
+        //try self.g.setCursor(.{
+        //    .row = 40,
+        //    .col = 0,
+        //});
+        //try self.g.showCursor();
+        std.log.debug("size: {d}", .{layout.columns[1].rows.items.len});
     }
 
     fn draw(
@@ -95,10 +265,14 @@ pub const Kitty = struct {
         player1: Battleship.BoardInterface,
     ) !void {
         _ = gpa;
-        var g = try Graphics.init(self.stdout);
-        try g.hideCursor();
-        try g.setCursor(.{ .row = 0, .col = 0 });
-        try g.eraseBelowCursor();
+        self.spacer0_col.reset();
+        self.spacer1_col.reset();
+        self.player0_col.reset();
+        self.player1_col.reset();
+
+        try self.g.hideCursor();
+        try self.g.setCursor(.{ .row = 0, .col = 0 });
+        //try self.g.eraseBelowCursor();
 
         const winsize = try Graphics.measureScreen();
         std.log.info("winsize: {any}", .{winsize});
@@ -113,9 +287,6 @@ pub const Kitty = struct {
         try col.print("{s}\n", .{grid_template});
         try col.flush();
 
-        self.spacer0_col.reset();
-
-        self.spacer1_col.reset();
         var spacer1_writer = self.spacer1_col.writer(&.{});
         const spacer1 = &spacer1_writer.interface;
         try spacer1.splatByteAll(' ', 5);
@@ -130,50 +301,72 @@ pub const Kitty = struct {
         const left_margin = (winsize.col - layout.width()) / 2;
         try spacer0.splatByteAll(' ', left_margin);
 
-        try self.stdout.print("{f}", .{layout});
+        try self.g.stdout.print("{f}", .{layout});
+
+        // TODO: remove this:
+        try self.g.image(.{ .action = .delete });
 
         // Draw contestant pics
         {
             const offset_x: u16 = @intCast(layout.offset(0) + 1);
             const offset_y: u16 = 2;
-            try g.imagePos(offset_x, offset_y, R.ralph.imageOptions());
+            try self.g.imagePos(offset_x, offset_y, R.ralph.imageOptions());
         }
         {
             const offset_x: u16 = @intCast(layout.offset(2) + 1);
             const offset_y: u16 = 2;
-            try g.imagePos(offset_x, offset_y, R.ralph.imageOptions());
+            try self.g.imagePos(offset_x, offset_y, R.ralph.imageOptions());
         }
 
         // Draw ships
         {
             const offset_x: u16 = @intCast(layout.offset(0) + 4);
             const offset_y: u16 = grid_start + 3;
-            try drawPlacements(&g, offset_x, offset_y, player0.placements);
+            try self.drawPlacements(offset_x, offset_y, player0.placements);
         }
         {
             const offset_x: u16 = @intCast(layout.offset(2) + 4);
             const offset_y: u16 = grid_start + 3;
-            try drawPlacements(&g, offset_x, offset_y, player1.placements);
+            try self.drawPlacements(offset_x, offset_y, player1.placements);
         }
-        try self.stdout.flush();
+        try self.g.stdout.flush();
 
         std.Thread.sleep(2000 * std.time.ns_per_ms);
-        try self.sampleAnimation(&g);
-        try g.setCursor(.{
+        try self.sampleAnimation();
+        try self.g.setCursor(.{
             .row = 40,
             .col = 0,
         });
-        try g.showCursor();
-        try self.stdout.flush();
+        try self.g.showCursor();
+        try self.g.stdout.flush();
+        std.log.debug("size: {d}", .{layout.columns.len});
     }
 
-    fn sampleAnimation(self: *Kitty, g: *Graphics) !void {
+    fn drawPlacements(
+        self: *Kitty,
+        offset_x: u16,
+        offset_y: u16,
+        placements: []const ?Battleship.Placement,
+    ) !void {
+        for (0..placements.len) |i| {
+            const placement = placements[i] orelse continue;
+            const x = offset_x + placement.x * 6;
+            const y = offset_y + placement.y * 3;
+            const res = switch (placement.orientation) {
+                .Horizontal => horizontal_ships[i],
+                .Vertical => vertical_ships[i],
+            };
+            try self.g.imagePos(@intCast(x), y, res.imageOptions());
+        }
+    }
+
+    fn sampleAnimation(self: *Kitty) !void {
         for (0..5) |j| {
             const j_u32: u32 = @intCast(j);
 
             for (0..10) |i| {
                 const i_u32: u32 = @intCast(i);
-                try g.imagePos(
+                try self.g.imagePos(
                     30,
                     20,
                     .{
@@ -189,31 +382,14 @@ pub const Kitty = struct {
                         .zindex = 1,
                     },
                 );
-                try self.stdout.flush();
+                try self.g.stdout.flush();
                 std.Thread.sleep(50 * std.time.ns_per_ms);
             }
         }
         std.Thread.sleep(2000 * std.time.ns_per_ms);
     }
 };
-
-fn drawPlacements(
-    g: *Graphics,
-    offset_x: u16,
-    offset_y: u16,
-    placements: []?Battleship.Placement,
-) !void {
-    for (0..placements.len) |i| {
-        const placement = placements[i] orelse continue;
-        const x = offset_x + placement.x * 6;
-        const y = offset_y + placement.y * 3;
-        const res = switch (placement.orientation) {
-            .Horizontal => horizontal_ships[i],
-            .Vertical => vertical_ships[i],
-        };
-        try g.imagePos(@intCast(x), y, res.imageOptions());
-    }
-}
+var debug_rng = std.Random.DefaultPrng.init(0);
 
 const grid_template =
     \\     0     1     2     3     4     5     6     7     8     9    10

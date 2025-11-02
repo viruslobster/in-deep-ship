@@ -34,95 +34,16 @@ pub const explosion = Self{
     .cols = 5,
 };
 
-pub const carrier_vertical = Self{
-    .image_file = .ship,
-    .frames = &[1]Frame{
-        .{ .x = 0, .y = 0, .w = 600, .h = 543 },
-    },
-    .cols = 5,
-    .rows = 17,
-};
-
-pub const carrier_horizontal = Self{
-    .image_file = .ship,
-    .frames = &[1]Frame{
-        .{ .x = 0, .y = 0, .w = 600, .h = 543 },
-    },
-    .cols = 29,
-    .rows = 2,
-};
-
-pub const battleship_vertical = Self{
-    .image_file = .ship,
-    .frames = &[1]Frame{
-        .{ .x = 0, .y = 0, .w = 600, .h = 543 },
-    },
-    .cols = 5,
-    .rows = 14,
-};
-
-pub const battleship_horizontal = Self{
-    .image_file = .ship,
-    .frames = &[1]Frame{
-        .{ .x = 0, .y = 0, .w = 600, .h = 543 },
-    },
-    .cols = 23,
-    .rows = 2,
-};
-
-pub const cruiser_vertical = Self{
-    .image_file = .ship,
-    .frames = &[1]Frame{
-        .{ .x = 0, .y = 0, .w = 600, .h = 543 },
-    },
-    .cols = 5,
-    .rows = 11,
-};
-
-pub const cruiser_horizontal = Self{
-    .image_file = .ship,
-    .frames = &[1]Frame{
-        .{ .x = 0, .y = 0, .w = 600, .h = 543 },
-    },
-    .cols = 17,
-    .rows = 2,
-};
-
-pub const submarine_vertical = Self{
-    .image_file = .ship,
-    .frames = &[1]Frame{
-        .{ .x = 0, .y = 0, .w = 600, .h = 543 },
-    },
-    .cols = 5,
-    .rows = 11,
-};
-
-pub const submarine_horizontal = Self{
-    .image_file = .ship,
-    .frames = &[1]Frame{
-        .{ .x = 0, .y = 0, .w = 600, .h = 543 },
-    },
-    .cols = 17,
-    .rows = 2,
-};
-
-pub const destroyer_vertical = Self{
-    .image_file = .ship,
-    .frames = &[1]Frame{
-        .{ .x = 0, .y = 0, .w = 600, .h = 543 },
-    },
-    .cols = 5,
-    .rows = 9,
-};
-
-pub const destroyer_horizontal = Self{
-    .image_file = .ship,
-    .frames = &[1]Frame{
-        .{ .x = 0, .y = 0, .w = 600, .h = 543 },
-    },
-    .cols = 11,
-    .rows = 2,
-};
+pub const carrier_vertical = spritesheet("carrier-vertical", .{ .cols = 5, .rows = 14 });
+pub const carrier_horizontal = spritesheet("carrier-horizontal", .{ .cols = 29, .rows = 2 });
+pub const battleship_vertical = spritesheet("battleship-vertical", .{ .cols = 5, .rows = 11 });
+pub const battleship_horizontal = spritesheet("battleship-horizontal", .{ .cols = 23, .rows = 2 });
+pub const cruiser_vertical = spritesheet("cruiser-vertical", .{ .cols = 5, .rows = 8 });
+pub const cruiser_horizontal = spritesheet("cruiser-horizontal", .{ .cols = 17, .rows = 2 });
+pub const submarine_vertical = spritesheet("submarine-vertical", .{ .cols = 5, .rows = 8 });
+pub const submarine_horizontal = spritesheet("submarine-horizontal", .{ .cols = 17, .rows = 2 });
+pub const destroyer_vertical = spritesheet("destroyer-vertical", .{ .cols = 5, .rows = 5 });
+pub const destroyer_horizontal = spritesheet("destroyer-horizontal", .{ .cols = 11, .rows = 2 });
 
 pub const ralph = Self{
     .image_file = .ralf,
@@ -135,8 +56,8 @@ pub const ralph = Self{
 
 pub const ImageFile = enum(u32) {
     explosion = 1,
-    ship,
     ralf,
+    spritesheet,
 
     pub fn id(self: ImageFile) u32 {
         return @intFromEnum(self);
@@ -145,8 +66,8 @@ pub const ImageFile = enum(u32) {
     fn path(self: ImageFile) []const u8 {
         return switch (self) {
             .explosion => "assets/explosions.png",
-            .ship => "assets/ship.png",
             .ralf => "assets/ralph.png",
+            .spritesheet => "assets/spritesheet.png",
         };
     }
 };
@@ -165,4 +86,72 @@ pub fn load(gpa: std.mem.Allocator, image: ImageFile) ![]u8 {
     defer file.close();
     const stat = try file.stat();
     return try file.readToEndAlloc(gpa, stat.size);
+}
+
+pub const SpriteMeta = packed struct {
+    const Rect = packed struct {
+        x: u32,
+        y: u32,
+        w: u32,
+        h: u32,
+    };
+
+    frame: Rect,
+    spriteSourceSize: Rect,
+    sourceSize: packed struct { w: u32, h: u32 },
+};
+
+const SpriteEntry = struct {
+    hash: u64,
+    value: SpriteMeta,
+};
+
+const sprites_len = countSprites();
+const sprites: [sprites_len]SpriteEntry = initSprites();
+
+fn countSprites() usize {
+    const sprite_bytes = @embedFile("assets/spritesheet.bin");
+    var reader = std.Io.Reader.fixed(sprite_bytes);
+    return reader.takeInt(u32, .big) catch
+        @compileError("failed to read sprite count");
+}
+
+fn initSprites() [sprites_len]SpriteEntry {
+    var result: [sprites_len]SpriteEntry = undefined;
+    const sprite_bytes = @embedFile("assets/spritesheet.bin");
+    var reader = std.Io.Reader.fixed(sprite_bytes);
+
+    // toss the number of sprites, read this in countSprites()
+    reader.toss(4);
+
+    for (0..sprites_len) |i| {
+        const hash = reader.takeInt(u32, .big) catch |err| switch (err) {
+            error.EndOfStream => break,
+            else => @compileError("failed to read hash"),
+        };
+        const meta = reader.takeStruct(SpriteMeta, .big) catch
+            @compileError("failed to read sprite meta");
+
+        result[i] = .{ .hash = hash, .value = meta };
+    }
+    return result;
+}
+
+/// Returns a `Resource` for the sprite with `name` in assets/spritesheet.json
+fn spritesheet(name: []const u8, opts: struct { rows: u8, cols: u8 }) Self {
+    const hash = std.hash.Crc32.hash(name);
+    for (&sprites) |sprite| {
+        if (sprite.hash != hash) continue;
+
+        const frame = sprite.value.frame;
+        return Self{
+            .image_file = .spritesheet,
+            .frames = &[1]Frame{
+                .{ .x = frame.x, .y = frame.y, .w = frame.w, .h = frame.h },
+            },
+            .cols = opts.cols,
+            .rows = opts.rows,
+        };
+    }
+    @compileError("Failed to load sprite");
 }
