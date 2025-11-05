@@ -96,6 +96,7 @@ pub const Kitty = struct {
     spacer1_col: Layout.Column = undefined,
     player0_col: Layout.Column = undefined,
     player1_col: Layout.Column = undefined,
+    last_winsize: std.posix.winsize = .{ .col = 0, .row = 0, .xpixel = 0, .ypixel = 0 },
 
     pub fn init(stdout: *std.Io.Writer) Kitty {
         return .{ .g = Graphics.init(stdout) };
@@ -159,10 +160,14 @@ pub const Kitty = struct {
         self.player0_col.reset();
         self.player1_col.reset();
         try self.g.setCursor(.{ .row = 0, .col = 0 });
-        //try self.g.eraseBelowCursor();
 
-        const winsize = try Graphics.measureScreen();
-        std.log.info("winsize: {any}", .{winsize});
+        const winsize = Graphics.measureWindow();
+        if (!std.meta.eql(winsize, self.last_winsize)) {
+            try self.g.setCursor(.{ .row = 1, .col = 1 });
+            try self.g.eraseBelowCursor();
+            try self.g.image(.{ .action = .delete });
+            self.last_winsize = winsize;
+        }
 
         // Write player columns
         // TODO: should probably be a function
@@ -194,10 +199,7 @@ pub const Kitty = struct {
         );
         var spacer0_writer = self.spacer0_col.writer(&.{});
         const spacer0 = &spacer0_writer.interface;
-        if (winsize.col < layout.width()) {
-            try self.g.setCursor(.{ .row = 1, .col = 1 });
-            try self.g.eraseBelowCursor();
-            try self.g.image(.{ .action = .delete });
+        if (winsize.col < layout.width() or winsize.row < layout.height() + 1) {
             try self.g.stdout.print("Window is too small to render game. Increase window size or decrease font size.", .{});
             try self.g.stdout.flush();
             return;
@@ -208,17 +210,25 @@ pub const Kitty = struct {
 
         try self.g.stdout.print("{f}", .{layout});
 
+        // Every image drawn gets a placement_id. Only the pair (image_id, placement_id)
+        // has to be unique. We use placement_ids so that existing images are moved
+
         // Draw contestant pics
         {
             const offset_x: u16 = @intCast(layout.offset(0) + 1);
             const offset_y: u16 = 2;
-            try self.g.imagePos(offset_x, offset_y, R.ralph.imageOptions());
+            var opts = R.ralph.imageOptions();
+            opts.placement_id = 1;
+            try self.g.imagePos(offset_x, offset_y, opts);
         }
         {
             const offset_x: u16 = @intCast(layout.offset(2) + 1);
             const offset_y: u16 = 2;
-            try self.g.imagePos(offset_x, offset_y, R.ralph.imageOptions());
+            var opts = R.ralph.imageOptions();
+            opts.placement_id = 2;
+            try self.g.imagePos(offset_x, offset_y, opts);
         }
+
         // Draw water
         {
             const offset_x: u16 = @intCast(layout.offset(0) + 3);
@@ -228,6 +238,7 @@ pub const Kitty = struct {
             // TODO: this is hardcoded. Needs to be a function of cell size
             opts.offset_x = 4;
             opts.offset_y = 10;
+            opts.placement_id = 1;
             try self.g.imagePos(offset_x, offset_y, opts);
         }
         {
@@ -238,21 +249,24 @@ pub const Kitty = struct {
             // TODO: this is hardcoded. Needs to be a function of cell size
             opts.offset_x = 4;
             opts.offset_y = 10;
+            opts.placement_id = 2;
             try self.g.imagePos(offset_x, offset_y, opts);
         }
 
         // Draw ships
+        var placement_id: u32 = 1;
         {
             const player = game.boards[0].interface();
             const offset_x: u16 = @intCast(layout.offset(0) + 4);
             const offset_y: u16 = grid_start + 3;
-            try self.drawPlacements(offset_x, offset_y, player.placements);
+            try self.drawPlacements(placement_id, offset_x, offset_y, player.placements);
+            placement_id += @intCast(player.placements.len);
         }
         {
             const player = game.boards[1].interface();
             const offset_x: u16 = @intCast(layout.offset(2) + 4);
             const offset_y: u16 = grid_start + 3;
-            try self.drawPlacements(offset_x, offset_y, player.placements);
+            try self.drawPlacements(placement_id, offset_x, offset_y, player.placements);
         }
         try self.g.stdout.flush();
         try self.playGif(R.hit);
@@ -263,6 +277,7 @@ pub const Kitty = struct {
 
     fn drawPlacements(
         self: *Kitty,
+        placement_id: u32,
         offset_x: u16,
         offset_y: u16,
         placements: []const ?Battleship.Placement,
@@ -275,7 +290,10 @@ pub const Kitty = struct {
                 .Horizontal => horizontal_ships[i],
                 .Vertical => vertical_ships[i],
             };
-            try self.g.imagePos(@intCast(x), y, res.imageOptions());
+            var opts = res.imageOptions();
+            const i_u32: u32 = @intCast(i);
+            opts.placement_id = placement_id + i_u32;
+            try self.g.imagePos(@intCast(x), y, opts);
         }
     }
 

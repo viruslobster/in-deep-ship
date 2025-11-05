@@ -124,11 +124,11 @@ pub fn showCursor(self: *Self) !void {
     try self.stdout.print("\x1b[?25h", .{});
 }
 
-pub fn measureScreen() !std.posix.winsize {
+pub fn measureWindow() std.posix.winsize {
     var winsize: std.posix.winsize = .{ .row = 0, .col = 0, .xpixel = 0, .ypixel = 0 };
     const result = std.posix.system.ioctl(0, std.posix.T.IOCGWINSZ, @intFromPtr(&winsize));
     if (std.posix.errno(result) != .SUCCESS) {
-        return error.MeasureScreen;
+        std.log.err("Failed to measure window", .{});
     }
     return winsize;
 }

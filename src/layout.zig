@@ -42,6 +42,14 @@ pub fn width(self: *const Self) usize {
     return self.offset(self.columns.len - 1);
 }
 
+pub fn height(self: *const Self) usize {
+    var result: usize = 0;
+    for (self.columns) |col| {
+        result = @max(col.row_idx + 1, result);
+    }
+    return result;
+}
+
 /// Implements std.Io.Writer for Column
 pub const ColumnWriter = struct {
     column: *Column,
@@ -108,6 +116,8 @@ pub const Column = struct {
     cols_hint: u32,
     gpa: std.mem.Allocator,
     err: ?Error = null,
+
+    // Index to the last row (TODO: rename?)
     row_idx: usize = 0,
     max_row_len: usize = 0,
 
