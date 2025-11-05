@@ -54,10 +54,41 @@ pub const ralph = Self{
     .rows = 9,
 };
 
+pub const water = Self{
+    .image_file = .water,
+    .frames = &[1]Frame{
+        .{ .x = 0, .y = 0, .w = 959, .h = 879 },
+    },
+    .cols = 66,
+    .rows = 27,
+};
+
+pub const hit = Self{
+    .image_file = .hit,
+    .frames = &gifFrames(55),
+    .cols = 5,
+    .rows = 2,
+};
+
+pub const miss = Self{
+    .image_file = .miss,
+    .frames = &gifFrames(51),
+    .cols = 5,
+    .rows = 2,
+};
+
+fn gifFrames(comptime n: usize) [n]Frame {
+    var frames: [n]Frame = undefined;
+    for (0..n) |i| frames[i] = .{ .x = 84 * i, .y = 0, .w = 84, .h = 84 };
+    return frames;
+}
+
 pub const ImageFile = enum(u32) {
-    explosion = 1,
+    spritesheet = 1,
+    water,
     ralf,
-    spritesheet,
+    hit,
+    miss,
 
     pub fn id(self: ImageFile) u32 {
         return @intFromEnum(self);
@@ -65,9 +96,11 @@ pub const ImageFile = enum(u32) {
 
     fn path(self: ImageFile) []const u8 {
         return switch (self) {
-            .explosion => "assets/explosions.png",
-            .ralf => "assets/ralph.png",
             .spritesheet => "assets/spritesheet.png",
+            .water => "assets/water.png",
+            .ralf => "assets/ralph.png",
+            .hit => "assets/hit.png",
+            .miss => "assets/miss.png",
         };
     }
 };

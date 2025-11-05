@@ -254,11 +254,6 @@ pub fn play(self: *Self, view: View.Interface) !void {
         wins[winner_id] += 1;
         _ = arena_allocator.reset(.retain_capacity);
     }
-    try view.draw(
-        self.gpa,
-        game.boards[0].interface(),
-        game.boards[1].interface(),
-    );
     try g.setCursor(.{ .row = 45, .col = 1 });
 }
 

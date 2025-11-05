@@ -29,9 +29,14 @@ pub const ImageOptions = struct {
     source_rect: ?struct { x: u32, y: u32, w: u32, h: u32 } = null,
     rows: ?u16 = null,
     cols: ?u16 = null,
+
+    // Offset within the cell to start drawing
+    offset_x: ?u16 = null,
+    offset_y: ?u16 = null,
+
     image_id: ?u32 = null,
     placement_id: ?u32 = null,
-    zindex: ?u32 = null,
+    zindex: ?i32 = null,
     quiet: enum(u8) { no = 0, kinda = 1, yes = 2 } = .yes,
 };
 
@@ -56,13 +61,19 @@ fn imageHeader(self: *Self, opts: ImageOptions) !void {
     if (opts.zindex) |zindex| {
         try self.stdout.print(",z={d}", .{zindex});
     }
+    if (opts.offset_x) |x| {
+        try self.stdout.print(",X={d}", .{x});
+    }
+    if (opts.offset_y) |y| {
+        try self.stdout.print(",Y={d}", .{y});
+    }
     try self.stdout.print(";", .{});
 }
 
 pub fn imageBytes(self: *Self, bytes: []u8, opts: ImageOptions) !void {
     try self.imageHeader(opts);
     try std.base64.standard.Encoder.encodeWriter(self.stdout, bytes);
-    try self.stdout.print("\x1b\\\n", .{});
+    try self.stdout.print("\x1b\\", .{});
 }
 
 pub fn imagePos(self: *Self, col: u16, row: u16, opts: ImageOptions) !void {

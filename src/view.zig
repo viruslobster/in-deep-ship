@@ -47,17 +47,6 @@ pub const Interface = union(Mode) {
             inline else => |variant| try variant.boards(game),
         }
     }
-
-    pub fn draw(
-        self: Interface,
-        gpa: std.mem.Allocator,
-        player0: Battleship.BoardInterface,
-        player1: Battleship.BoardInterface,
-    ) !void {
-        switch (self) {
-            inline else => |variant| try variant.draw(gpa, player0, player1),
-        }
-    }
 };
 
 pub const Debug = struct {
@@ -99,18 +88,6 @@ pub const Debug = struct {
         try self.g.stdout.print("Player 1: \n{f}", .{game.boards[1]});
         try self.g.stdout.flush();
     }
-
-    fn draw(
-        self: *Debug,
-        gpa: std.mem.Allocator,
-        player0: Battleship.BoardInterface,
-        player1: Battleship.BoardInterface,
-    ) !void {
-        _ = self;
-        _ = gpa;
-        _ = player0;
-        _ = player1;
-    }
 };
 
 pub const Kitty = struct {
@@ -137,7 +114,10 @@ pub const Kitty = struct {
 
         const images: []const R.ImageFile = &.{
             R.ImageFile.spritesheet,
+            R.ImageFile.water,
             R.ImageFile.ralf,
+            R.ImageFile.hit,
+            R.ImageFile.miss,
         };
         for (images) |img_file| {
             const bytes = R.load(arena_alloc, img_file) catch |err| {
@@ -232,6 +212,27 @@ pub const Kitty = struct {
             const offset_y: u16 = 2;
             try self.g.imagePos(offset_x, offset_y, R.ralph.imageOptions());
         }
+        // Draw water
+        {
+            const offset_x: u16 = @intCast(layout.offset(0) + 3);
+            const offset_y: u16 = grid_start + 2;
+            var opts = R.water.imageOptions();
+            opts.zindex = -1;
+            // TODO: this is hardcoded. Needs to be a function of cell size
+            opts.offset_x = 4;
+            opts.offset_y = 10;
+            try self.g.imagePos(offset_x, offset_y, opts);
+        }
+        {
+            const offset_x: u16 = @intCast(layout.offset(2) + 3);
+            const offset_y: u16 = grid_start + 2;
+            var opts = R.water.imageOptions();
+            opts.zindex = -1;
+            // TODO: this is hardcoded. Needs to be a function of cell size
+            opts.offset_x = 4;
+            opts.offset_y = 10;
+            try self.g.imagePos(offset_x, offset_y, opts);
+        }
 
         // Draw ships
         {
@@ -247,99 +248,10 @@ pub const Kitty = struct {
             try self.drawPlacements(offset_x, offset_y, player.placements);
         }
         try self.g.stdout.flush();
+        try self.playGif(R.hit);
 
         std.Thread.sleep(2000 * std.time.ns_per_ms);
-        //try self.sampleAnimation();
-        //try self.g.setCursor(.{
-        //    .row = 40,
-        //    .col = 0,
-        //});
-        //try self.g.showCursor();
         std.log.debug("size: {d}", .{layout.columns[1].rows.items.len});
-    }
-
-    fn draw(
-        self: *Kitty,
-        gpa: std.mem.Allocator,
-        player0: Battleship.BoardInterface,
-        player1: Battleship.BoardInterface,
-    ) !void {
-        _ = gpa;
-        self.spacer0_col.reset();
-        self.spacer1_col.reset();
-        self.player0_col.reset();
-        self.player1_col.reset();
-
-        try self.g.hideCursor();
-        try self.g.setCursor(.{ .row = 0, .col = 0 });
-        //try self.g.eraseBelowCursor();
-
-        const winsize = try Graphics.measureScreen();
-        std.log.info("winsize: {any}", .{winsize});
-
-        var col_buffer: [256]u8 = undefined;
-        var col_writer = self.player0_col.writer(&col_buffer);
-        var col = &col_writer.interface;
-        try col.print("Player: foo", .{});
-        const grid_start: u16 = 11;
-        try col.splatByteAll('\n', grid_start);
-
-        try col.print("{s}\n", .{grid_template});
-        try col.flush();
-
-        var spacer1_writer = self.spacer1_col.writer(&.{});
-        const spacer1 = &spacer1_writer.interface;
-        try spacer1.splatByteAll(' ', 5);
-
-        const layout = Layout.init(
-            &.{ &self.spacer0_col, &self.player0_col, &self.spacer1_col, &self.player0_col },
-        );
-        var spacer0_writer = self.spacer0_col.writer(&.{});
-        const spacer0 = &spacer0_writer.interface;
-        if (winsize.col < layout.width()) return error.WindowTooSmall;
-
-        const left_margin = (winsize.col - layout.width()) / 2;
-        try spacer0.splatByteAll(' ', left_margin);
-
-        try self.g.stdout.print("{f}", .{layout});
-
-        // TODO: remove this:
-        try self.g.image(.{ .action = .delete });
-
-        // Draw contestant pics
-        {
-            const offset_x: u16 = @intCast(layout.offset(0) + 1);
-            const offset_y: u16 = 2;
-            try self.g.imagePos(offset_x, offset_y, R.ralph.imageOptions());
-        }
-        {
-            const offset_x: u16 = @intCast(layout.offset(2) + 1);
-            const offset_y: u16 = 2;
-            try self.g.imagePos(offset_x, offset_y, R.ralph.imageOptions());
-        }
-
-        // Draw ships
-        {
-            const offset_x: u16 = @intCast(layout.offset(0) + 4);
-            const offset_y: u16 = grid_start + 3;
-            try self.drawPlacements(offset_x, offset_y, player0.placements);
-        }
-        {
-            const offset_x: u16 = @intCast(layout.offset(2) + 4);
-            const offset_y: u16 = grid_start + 3;
-            try self.drawPlacements(offset_x, offset_y, player1.placements);
-        }
-        try self.g.stdout.flush();
-
-        std.Thread.sleep(2000 * std.time.ns_per_ms);
-        try self.sampleAnimation();
-        try self.g.setCursor(.{
-            .row = 40,
-            .col = 0,
-        });
-        try self.g.showCursor();
-        try self.g.stdout.flush();
-        std.log.debug("size: {d}", .{layout.columns.len});
     }
 
     fn drawPlacements(
@@ -360,33 +272,25 @@ pub const Kitty = struct {
         }
     }
 
-    fn sampleAnimation(self: *Kitty) !void {
-        for (0..5) |j| {
-            const j_u32: u32 = @intCast(j);
-
-            for (0..10) |i| {
-                const i_u32: u32 = @intCast(i);
-                try self.g.imagePos(
-                    30,
-                    20,
-                    .{
-                        .action = .put,
-                        .image_id = R.ImageFile.explosion.id(),
-                        .placement_id = 1,
-                        .source_rect = .{
-                            .x = 100 * i_u32,
-                            .y = 100 * j_u32,
-                            .w = 100,
-                            .h = 100,
-                        },
-                        .zindex = 1,
-                    },
-                );
-                try self.g.stdout.flush();
-                std.Thread.sleep(50 * std.time.ns_per_ms);
-            }
+    fn playGif(self: *Kitty, gif: R) !void {
+        const sleep_time: u64 = 50;
+        for (gif.frames) |frame| {
+            try self.g.imagePos(
+                32,
+                20,
+                .{
+                    .action = .put,
+                    .image_id = gif.image_file.id(),
+                    .placement_id = 1,
+                    .source_rect = .{ .x = frame.x, .y = frame.y, .w = frame.w, .h = frame.h },
+                    .zindex = 1,
+                    .rows = gif.rows,
+                    .cols = gif.cols,
+                },
+            );
+            try self.g.stdout.flush();
+            std.Thread.sleep(sleep_time * std.time.ns_per_ms);
         }
-        std.Thread.sleep(2000 * std.time.ns_per_ms);
     }
 };
 var debug_rng = std.Random.DefaultPrng.init(0);
