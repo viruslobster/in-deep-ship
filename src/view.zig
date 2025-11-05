@@ -194,7 +194,14 @@ pub const Kitty = struct {
         );
         var spacer0_writer = self.spacer0_col.writer(&.{});
         const spacer0 = &spacer0_writer.interface;
-        if (winsize.col < layout.width()) return error.WindowTooSmall;
+        if (winsize.col < layout.width()) {
+            try self.g.setCursor(.{ .row = 1, .col = 1 });
+            try self.g.eraseBelowCursor();
+            try self.g.image(.{ .action = .delete });
+            try self.g.stdout.print("Window is too small to render game. Increase window size or decrease font size.", .{});
+            try self.g.stdout.flush();
+            return;
+        }
 
         const left_margin = (winsize.col - layout.width()) / 2;
         try spacer0.splatByteAll(' ', left_margin);

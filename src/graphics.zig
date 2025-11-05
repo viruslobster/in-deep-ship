@@ -79,12 +79,12 @@ pub fn imageBytes(self: *Self, bytes: []u8, opts: ImageOptions) !void {
 pub fn imagePos(self: *Self, col: u16, row: u16, opts: ImageOptions) !void {
     try self.setCursor(.{ .row = row, .col = col });
     try self.imageHeader(opts);
-    try self.stdout.print("\x1b\\\n", .{});
+    try self.stdout.print("\x1b\\", .{});
 }
 
 pub fn image(self: *Self, opts: ImageOptions) !void {
     try self.imageHeader(opts);
-    try self.stdout.print("\x1b\\\n", .{});
+    try self.stdout.print("\x1b\\", .{});
 }
 
 pub fn drawRes(self: *Self, row: u16, col: u16, res: *Resource) !void {

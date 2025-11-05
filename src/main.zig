@@ -84,13 +84,7 @@ pub fn main() !void {
         .entries = entries,
         .cwd = base_dir,
     };
-    tournament.play(view) catch |err| switch (err) {
-        error.WindowTooSmall => {
-            std.log.err("Window is too small or font size is too big to render game", .{});
-            std.process.exit(1);
-        },
-        else => return err,
-    };
+    try tournament.play(view);
 }
 
 test {
