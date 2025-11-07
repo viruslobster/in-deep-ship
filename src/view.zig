@@ -230,14 +230,16 @@ pub const Kitty = struct {
         }
 
         // Draw water
+        const cell_offset_x: f32 = @as(f32, @floatFromInt(winsize.xpixel)) / @as(f32, @floatFromInt(winsize.col)) / 2 + 0.5;
+        const cell_offset_y: f32 = @as(f32, @floatFromInt(winsize.ypixel)) / @as(f32, @floatFromInt(winsize.row)) / 2 + 0.5;
         {
             const offset_x: u16 = @intCast(layout.offset(0) + 3);
             const offset_y: u16 = grid_start + 2;
             var opts = R.water.imageOptions();
             opts.zindex = -1;
             // TODO: this is hardcoded. Needs to be a function of cell size
-            opts.offset_x = 4;
-            opts.offset_y = 10;
+            opts.offset_x = @intFromFloat(cell_offset_x);
+            opts.offset_y = @intFromFloat(cell_offset_y);
             opts.placement_id = 1;
             try self.g.imagePos(offset_x, offset_y, opts);
         }
@@ -247,8 +249,8 @@ pub const Kitty = struct {
             var opts = R.water.imageOptions();
             opts.zindex = -1;
             // TODO: this is hardcoded. Needs to be a function of cell size
-            opts.offset_x = 4;
-            opts.offset_y = 10;
+            opts.offset_x = @intFromFloat(cell_offset_x);
+            opts.offset_y = @intFromFloat(cell_offset_y);
             opts.placement_id = 2;
             try self.g.imagePos(offset_x, offset_y, opts);
         }
