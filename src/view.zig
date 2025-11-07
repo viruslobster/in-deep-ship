@@ -94,8 +94,7 @@ pub const Kitty = struct {
     g: Graphics,
     spacer0_col: Layout.Column = undefined,
     spacer1_col: Layout.Column = undefined,
-    player0_col: Layout.Column = undefined,
-    player1_col: Layout.Column = undefined,
+    player_cols: [2]Layout.Column = undefined,
     last_winsize: std.posix.winsize = .{ .col = 0, .row = 0, .xpixel = 0, .ypixel = 0 },
 
     pub fn init(stdout: *std.Io.Writer) Kitty {
@@ -131,8 +130,8 @@ pub const Kitty = struct {
             );
             _ = arena.reset(.retain_capacity);
         }
-        self.player0_col = try Layout.Column.init(gpa, 100, 100);
-        self.player1_col = try Layout.Column.init(gpa, 100, 100);
+        self.player_cols[0] = try Layout.Column.init(gpa, 100, 100);
+        self.player_cols[1] = try Layout.Column.init(gpa, 100, 100);
         self.spacer0_col = try Layout.Column.init(gpa, 1, 100);
         self.spacer1_col = try Layout.Column.init(gpa, 1, 100);
         try self.g.hideCursor();
@@ -157,12 +156,12 @@ pub const Kitty = struct {
     fn boards(self: *Kitty, game: *const Tournament.Game) !void {
         self.spacer0_col.reset();
         self.spacer1_col.reset();
-        self.player0_col.reset();
-        self.player1_col.reset();
+        for (&self.player_cols) |*c| c.reset();
         try self.g.setCursor(.{ .row = 0, .col = 0 });
 
         const winsize = Graphics.measureWindow();
         if (!std.meta.eql(winsize, self.last_winsize)) {
+            // On size change everything will be drawn out of place. Erase everything and start fresh
             try self.g.setCursor(.{ .row = 1, .col = 1 });
             try self.g.eraseBelowCursor();
             try self.g.image(.{ .action = .delete });
@@ -170,111 +169,80 @@ pub const Kitty = struct {
         }
 
         // Write player columns
-        // TODO: should probably be a function
         var col_buffer: [256]u8 = undefined;
         const grid_start: u16 = 11;
-        {
-            var col_writer = self.player0_col.writer(&col_buffer);
+        inline for (0..2) |i| {
+            var col_writer = self.player_cols[i].writer(&col_buffer);
             var col = &col_writer.interface;
-            try col.print("Player: {s}", .{game.entries[0].name});
-            try col.splatByteAll('\n', grid_start);
-            try col.print("{s}\n", .{grid_template});
-            try col.flush();
-        }
-        {
-            var col_writer = self.player1_col.writer(&col_buffer);
-            var col = &col_writer.interface;
-            try col.print("Player: {s}", .{game.entries[1].name});
+            try col.print("Player: {s}", .{game.entries[i].name});
             try col.splatByteAll('\n', grid_start);
             try col.print("{s}\n", .{grid_template});
             try col.flush();
         }
 
+        // Space between the two player columns
         var spacer1_writer = self.spacer1_col.writer(&.{});
         const spacer1 = &spacer1_writer.interface;
         try spacer1.splatByteAll(' ', 5);
 
         const layout = Layout.init(
-            &.{ &self.spacer0_col, &self.player0_col, &self.spacer1_col, &self.player1_col },
+            &.{ &self.spacer0_col, &self.player_cols[0], &self.spacer1_col, &self.player_cols[1] },
         );
-        var spacer0_writer = self.spacer0_col.writer(&.{});
-        const spacer0 = &spacer0_writer.interface;
         if (winsize.col < layout.width() or winsize.row < layout.height() + 1) {
             try self.g.stdout.print("Window is too small to render game. Increase window size or decrease font size.", .{});
             try self.g.stdout.flush();
             return;
         }
 
+        // Size the left margin such that the game is in the center
         const left_margin = (winsize.col - layout.width()) / 2;
+        var spacer0_writer = self.spacer0_col.writer(&.{});
+        const spacer0 = &spacer0_writer.interface;
         try spacer0.splatByteAll(' ', left_margin);
 
+        // Render all the text
         try self.g.stdout.print("{f}", .{layout});
 
+        // Render all the images
         // Every image drawn gets a placement_id. Only the pair (image_id, placement_id)
         // has to be unique. We use placement_ids so that existing images are moved
 
         // Draw contestant pics
-        {
-            const offset_x: u16 = @intCast(layout.offset(0) + 1);
+        inline for (0..2) |i| {
+            const offset_x: u16 = @intCast(layout.offset(i * 2) + 1);
             const offset_y: u16 = 2;
             var opts = R.ralph.imageOptions();
-            opts.placement_id = 1;
-            try self.g.imagePos(offset_x, offset_y, opts);
-        }
-        {
-            const offset_x: u16 = @intCast(layout.offset(2) + 1);
-            const offset_y: u16 = 2;
-            var opts = R.ralph.imageOptions();
-            opts.placement_id = 2;
+            opts.placement_id = i + 1;
             try self.g.imagePos(offset_x, offset_y, opts);
         }
 
         // Draw water
         const cell_offset_x: f32 = @as(f32, @floatFromInt(winsize.xpixel)) / @as(f32, @floatFromInt(winsize.col)) / 2 + 0.5;
         const cell_offset_y: f32 = @as(f32, @floatFromInt(winsize.ypixel)) / @as(f32, @floatFromInt(winsize.row)) / 2 + 0.5;
-        {
-            const offset_x: u16 = @intCast(layout.offset(0) + 3);
-            const offset_y: u16 = grid_start + 2;
+        inline for (0..2) |i| {
             var opts = R.water.imageOptions();
             opts.zindex = -1;
-            // TODO: this is hardcoded. Needs to be a function of cell size
+            // This offset is where to start drawing within a cell
             opts.offset_x = @intFromFloat(cell_offset_x);
             opts.offset_y = @intFromFloat(cell_offset_y);
-            opts.placement_id = 1;
-            try self.g.imagePos(offset_x, offset_y, opts);
-        }
-        {
-            const offset_x: u16 = @intCast(layout.offset(2) + 3);
+            opts.placement_id = i + 1;
+            // This offset is what cell to start drawing at
+            const offset_x: u16 = @intCast(layout.offset(i * 2) + 3);
             const offset_y: u16 = grid_start + 2;
-            var opts = R.water.imageOptions();
-            opts.zindex = -1;
-            // TODO: this is hardcoded. Needs to be a function of cell size
-            opts.offset_x = @intFromFloat(cell_offset_x);
-            opts.offset_y = @intFromFloat(cell_offset_y);
-            opts.placement_id = 2;
             try self.g.imagePos(offset_x, offset_y, opts);
         }
 
         // Draw ships
         var placement_id: u32 = 1;
-        {
-            const player = game.boards[0].interface();
-            const offset_x: u16 = @intCast(layout.offset(0) + 4);
+        inline for (0..2) |i| {
+            const player = game.boards[i].interface();
+            const offset_x: u16 = @intCast(layout.offset(i * 2) + 4);
             const offset_y: u16 = grid_start + 3;
             try self.drawPlacements(placement_id, offset_x, offset_y, player.placements);
             placement_id += @intCast(player.placements.len);
         }
-        {
-            const player = game.boards[1].interface();
-            const offset_x: u16 = @intCast(layout.offset(2) + 4);
-            const offset_y: u16 = grid_start + 3;
-            try self.drawPlacements(placement_id, offset_x, offset_y, player.placements);
-        }
         try self.g.stdout.flush();
         try self.playGif(R.hit);
-
-        std.Thread.sleep(2000 * std.time.ns_per_ms);
-        std.log.debug("size: {d}", .{layout.columns[1].rows.items.len});
     }
 
     fn drawPlacements(
