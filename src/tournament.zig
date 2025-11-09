@@ -328,8 +328,8 @@ fn playGame(game: *Game, view: View.Interface, arena_alloc: *std.heap.ArenaAlloc
     // Take turns
     // TODO: randomize player_id
     while (true) {
-        try playGameTurn(game, player_id);
         try view.boards(game);
+        try playGameTurn(game, view, player_id);
 
         if (game.boards[0].allSunk()) {
             try game.players[0].writeMessage(.{ .lose = {} });
@@ -347,7 +347,7 @@ fn playGame(game: *Game, view: View.Interface, arena_alloc: *std.heap.ArenaAlloc
     }
 }
 
-fn playGameTurn(game: *Game, player_id: usize) !void {
+fn playGameTurn(game: *Game, view: View.Interface, player_id: usize) !void {
     const player = &game.players[player_id];
     try player.writeMessage(.{ .turn_request = {} });
     const t0 = std.time.milliTimestamp();
@@ -365,7 +365,10 @@ fn playGameTurn(game: *Game, player_id: usize) !void {
         }
 
         switch (message) {
-            .turn_response => |turn| try game.takeTurn(player_id, turn.x, turn.y),
+            .turn_response => |turn| {
+                try game.takeTurn(player_id, turn.x, turn.y);
+                try view.fire(player_id, .{ .x = 5, .y = 1 }, .Hit);
+            },
             else => {
                 std.log.info("{s}: Unexpected message: {f}", .{ player.entry.name, message });
                 continue;

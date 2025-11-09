@@ -188,11 +188,6 @@ pub const Orientation = enum {
     }
 };
 
-pub const Point = struct {
-    x: usize,
-    y: usize,
-};
-
 fn csiColor(sink: *std.Io.Writer, value: ?u16) !void {
     if (value) |v| {
         try sink.print("\x1b[{d}m", .{v});

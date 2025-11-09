@@ -47,6 +47,13 @@ pub const Interface = union(Mode) {
             inline else => |variant| try variant.boards(game),
         }
     }
+
+    /// Fire at player_id
+    pub fn fire(self: Interface, player_id: usize, shot: Point, kind: Battleship.Shot) !void {
+        switch (self) {
+            inline else => |variant| try variant.fire(player_id, shot, kind),
+        }
+    }
 };
 
 pub const Debug = struct {
@@ -88,9 +95,19 @@ pub const Debug = struct {
         try self.g.stdout.print("Player 1: \n{f}", .{game.boards[1]});
         try self.g.stdout.flush();
     }
+
+    pub fn fire(self: *Debug, player_id: usize, shot: Point, kind: Battleship.Shot) !void {
+        // Noop for debug
+        _ = self;
+        _ = player_id;
+        _ = shot;
+        _ = kind;
+    }
 };
 
 pub const Kitty = struct {
+    const grid_start: u16 = 11;
+
     g: Graphics,
     spacer0_col: Layout.Column = undefined,
     spacer1_col: Layout.Column = undefined,
@@ -170,7 +187,6 @@ pub const Kitty = struct {
 
         // Write player columns
         var col_buffer: [256]u8 = undefined;
-        const grid_start: u16 = 11;
         inline for (0..2) |i| {
             var col_writer = self.player_cols[i].writer(&col_buffer);
             var col = &col_writer.interface;
@@ -242,7 +258,18 @@ pub const Kitty = struct {
             placement_id += @intCast(player.placements.len);
         }
         try self.g.stdout.flush();
-        try self.playGif(R.hit);
+    }
+
+    /// Assumes Kitty.boards has already been called
+    pub fn fire(self: *Kitty, player_id: usize, shot: Point, kind: Battleship.Shot) !void {
+        _ = player_id;
+        _ = kind;
+        const layout = Layout.init(
+            &.{ &self.spacer0_col, &self.player_cols[0], &self.spacer1_col, &self.player_cols[1] },
+        );
+        const offset_x: u16 = @as(u16, @intCast(layout.offset(0) + 4)) + shot.x * 6;
+        const offset_y: u16 = grid_start + 3 + shot.y * 3;
+        try self.playGif(R.hit, offset_x, offset_y);
     }
 
     fn drawPlacements(
@@ -267,12 +294,12 @@ pub const Kitty = struct {
         }
     }
 
-    fn playGif(self: *Kitty, gif: R) !void {
+    fn playGif(self: *Kitty, gif: R, x: u16, y: u16) !void {
         const sleep_time: u64 = 50;
         for (gif.frames) |frame| {
             try self.g.imagePos(
-                32,
-                20,
+                x,
+                y,
                 .{
                     .action = .put,
                     .image_id = gif.image_file.id(),
@@ -335,4 +362,9 @@ const vertical_ships = [_]R{
     R.cruiser_vertical,
     R.submarine_vertical,
     R.destroyer_vertical,
+};
+
+pub const Point = struct {
+    x: u16,
+    y: u16,
 };
