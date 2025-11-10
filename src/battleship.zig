@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const ShipId = usize;
+
 pub fn Board(width: usize, height: usize, ships: []const Ship) type {
     const board_len = width * height;
     const ship_len = ships.len;
@@ -32,6 +34,18 @@ pub fn Board(width: usize, height: usize, ships: []const Ship) type {
                 .width = self.width,
                 .height = self.height,
             };
+        }
+
+        pub fn getShipPtr(self: *Self, id: ShipId) *Ship {
+            return &self.ships[id];
+        }
+
+        pub fn getShip(self: *const Self, id: ShipId) Ship {
+            return self.ships[id];
+        }
+
+        pub fn getPlacement(self: *const Self, id: ShipId) ?Placement {
+            return self.placements[id];
         }
 
         pub inline fn index(x: usize, y: usize) usize {
@@ -94,17 +108,19 @@ pub fn Board(width: usize, height: usize, ships: []const Ship) type {
             const cell = self.at_ptr(x, y) catch return .{ .Miss = {} };
 
             // Don't double count a result on an already explored cell
-            if (cell.hit and cell.ship_idx != null) return .{ .Hit = {} };
-            if (cell.hit) return .{ .Miss = {} };
+            if (cell.shot) |shot| return shot;
 
-            cell.hit = true;
-            const idx = cell.ship_idx orelse return .{ .Miss = {} };
-            const ship = &self.ships[idx];
-            ship.hits += 1;
-            std.debug.assert(ship.hits <= ship.size);
+            const shot: Shot = blk: {
+                const id = cell.ship_idx orelse break :blk .{ .Miss = {} };
+                const ship = self.getShipPtr(id);
+                ship.hits += 1;
+                std.debug.assert(ship.hits <= ship.size);
 
-            if (ship.hits < ship.size) return .{ .Hit = {} };
-            return .{ .Sink = ship };
+                if (ship.hits < ship.size) break :blk .{ .Hit = {} };
+                break :blk .{ .Sink = id };
+            };
+            cell.shot = shot;
+            return shot;
         }
 
         pub fn format(self: Self, sink: *std.Io.Writer) !void {
@@ -123,7 +139,7 @@ pub fn Board(width: usize, height: usize, ships: []const Ship) type {
                     if (cell_ship) |ship| {
                         if (ship.hits >= ship.size) {
                             try csiColor(sink, 41);
-                        } else if (cell.hit) {
+                        } else if (cell.shot != null) {
                             try csiColor(sink, 43);
                         } else {
                             try csiColor(sink, null);
@@ -133,7 +149,7 @@ pub fn Board(width: usize, height: usize, ships: []const Ship) type {
                         continue;
                     }
                     try csiColor(sink, null);
-                    const char: u8 = if (cell.hit) 'X' else ' ';
+                    const char: u8 = if (cell.shot != null) 'X' else ' ';
                     try sink.print("{c}{c} ", .{ char, char });
                 }
                 try csiColor(sink, null);
@@ -149,12 +165,22 @@ pub const BoardInterface = struct {
     cells: []const Cell,
     width: usize,
     height: usize,
+
+    pub inline fn index(self: *const BoardInterface, x: usize, y: usize) usize {
+        return y * self.width + x;
+    }
+
+    pub fn at(self: *const BoardInterface, x: usize, y: usize) !Cell {
+        if (x >= self.width or y >= self.height) return error.OutOfBounds;
+        const i = self.index(x, y);
+        return self.cells[i];
+    }
 };
 
 const Cell = struct {
     // index into `ships`
-    ship_idx: ?usize = null,
-    hit: bool = false,
+    ship_idx: ?ShipId = null,
+    shot: ?Shot = null,
 };
 
 pub const Ship = struct {
@@ -165,7 +191,7 @@ pub const Ship = struct {
 pub const Shot = union(enum) {
     Miss: void,
     Hit: void,
-    Sink: *Ship,
+    Sink: ShipId,
 
     pub fn format(self: Shot, sink: *std.Io.Writer) !void {
         try switch (self) {

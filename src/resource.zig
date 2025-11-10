@@ -24,26 +24,31 @@ pub fn imageOptions(self: *const Self) Graphics.ImageOptions {
     };
 }
 
-pub const explosion = Self{
-    .image_file = .explosion,
-    .frames = &[2]Frame{
-        .{ .x = 0, .y = 0, .w = 0, .h = 0 },
-        .{ .x = 0, .y = 0, .w = 0, .h = 0 },
-    },
-    .rows = 5,
-    .cols = 5,
-};
+pub fn imageOptions2(self: *const Self, frame_idx: usize) Graphics.ImageOptions {
+    return .{
+        .action = .put,
+        .image_id = self.image_file.id(),
+        .rows = self.rows,
+        .cols = self.cols,
+        .source_rect = .{
+            .x = self.frames[frame_idx].x,
+            .y = self.frames[frame_idx].y,
+            .w = self.frames[frame_idx].w,
+            .h = self.frames[frame_idx].h,
+        },
+    };
+}
 
-pub const carrier_vertical = spritesheet("carrier-vertical", .{ .cols = 5, .rows = 14 });
-pub const carrier_horizontal = spritesheet("carrier-horizontal", .{ .cols = 29, .rows = 2 });
-pub const battleship_vertical = spritesheet("battleship-vertical", .{ .cols = 5, .rows = 11 });
-pub const battleship_horizontal = spritesheet("battleship-horizontal", .{ .cols = 23, .rows = 2 });
-pub const cruiser_vertical = spritesheet("cruiser-vertical", .{ .cols = 5, .rows = 8 });
-pub const cruiser_horizontal = spritesheet("cruiser-horizontal", .{ .cols = 17, .rows = 2 });
-pub const submarine_vertical = spritesheet("submarine-vertical", .{ .cols = 5, .rows = 8 });
-pub const submarine_horizontal = spritesheet("submarine-horizontal", .{ .cols = 17, .rows = 2 });
-pub const destroyer_vertical = spritesheet("destroyer-vertical", .{ .cols = 5, .rows = 5 });
-pub const destroyer_horizontal = spritesheet("destroyer-horizontal", .{ .cols = 11, .rows = 2 });
+pub const carrier_vertical = shipSprite("carrier-vertical", .{ .cols = 5, .rows = 14 });
+pub const carrier_horizontal = shipSprite("carrier-horizontal", .{ .cols = 29, .rows = 2 });
+pub const battleship_vertical = shipSprite("battleship-vertical", .{ .cols = 5, .rows = 11 });
+pub const battleship_horizontal = shipSprite("battleship-horizontal", .{ .cols = 23, .rows = 2 });
+pub const cruiser_vertical = shipSprite("cruiser-vertical", .{ .cols = 5, .rows = 8 });
+pub const cruiser_horizontal = shipSprite("cruiser-horizontal", .{ .cols = 17, .rows = 2 });
+pub const submarine_vertical = shipSprite("submarine-vertical", .{ .cols = 5, .rows = 8 });
+pub const submarine_horizontal = shipSprite("submarine-horizontal", .{ .cols = 17, .rows = 2 });
+pub const destroyer_vertical = shipSprite("destroyer-vertical", .{ .cols = 5, .rows = 5 });
+pub const destroyer_horizontal = shipSprite("destroyer-horizontal", .{ .cols = 11, .rows = 2 });
 
 pub const ralph = Self{
     .image_file = .ralf,
@@ -170,21 +175,32 @@ fn initSprites() [sprites_len]SpriteEntry {
     return result;
 }
 
-/// Returns a `Resource` for the sprite with `name` in assets/spritesheet.json
-fn spritesheet(name: []const u8, opts: struct { rows: u8, cols: u8 }) Self {
+/// Returns a `Resource` for a ship sprite with `name` in assets/spritesheet.json
+/// The first frame is the regular ship, the second is the sunk ship.
+fn shipSprite(name: []const u8, opts: struct { rows: u8, cols: u8 }) Self {
+    const frame = shipSpriteFrame(name);
+    var buffer: [256]u8 = undefined;
+    var writer = std.Io.Writer.fixed(&buffer);
+    try writer.print("{s}-sunk", .{name});
+    const name_sunk = writer.buffered();
+    const frame_sunk = shipSpriteFrame(name_sunk);
+
+    return Self{
+        .image_file = .spritesheet,
+        .frames = &[2]Frame{
+            .{ .x = frame.x, .y = frame.y, .w = frame.w, .h = frame.h },
+            .{ .x = frame_sunk.x, .y = frame_sunk.y, .w = frame_sunk.w, .h = frame_sunk.h },
+        },
+        .cols = opts.cols,
+        .rows = opts.rows,
+    };
+}
+
+fn shipSpriteFrame(name: []const u8) SpriteMeta.Rect {
     const hash = std.hash.Crc32.hash(name);
     for (&sprites) |sprite| {
         if (sprite.hash != hash) continue;
-
-        const frame = sprite.value.frame;
-        return Self{
-            .image_file = .spritesheet,
-            .frames = &[1]Frame{
-                .{ .x = frame.x, .y = frame.y, .w = frame.w, .h = frame.h },
-            },
-            .cols = opts.cols,
-            .rows = opts.rows,
-        };
+        return sprite.value.frame;
     }
     @compileError("Failed to load sprite");
 }

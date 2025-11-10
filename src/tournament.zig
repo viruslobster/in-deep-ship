@@ -29,8 +29,6 @@ pub const Game = struct {
     entries: [2]*const Meta.Entry,
     players: [2]Player,
     boards: [2]BattleshipBoard,
-    // TODO: we don't need this
-    radars: [2]BattleshipBoard,
     penalties: [2]u32,
 
     fn init(gpa: std.mem.Allocator, entry0: *const Meta.Entry, entry1: *const Meta.Entry) Game {
@@ -45,7 +43,6 @@ pub const Game = struct {
                 Player.init(entry1, gpa),
             },
             .boards = boards,
-            .radars = boards,
             .penalties = [2]u32{ 0, 0 },
         };
     }
@@ -78,10 +75,6 @@ pub const Game = struct {
             BattleshipBoard.init(),
             BattleshipBoard.init(),
         };
-        self.radars = [2]BattleshipBoard{
-            BattleshipBoard.init(),
-            BattleshipBoard.init(),
-        };
     }
 
     fn placeShips(
@@ -102,7 +95,7 @@ pub const Game = struct {
         return;
     }
 
-    fn takeTurn(self: *Game, player_id: usize, x: usize, y: usize) !void {
+    fn takeTurn(self: *Game, player_id: usize, x: usize, y: usize) !Battleship.Shot {
         const player = &self.players[player_id];
         const other = (player_id + 1) % 2;
         const other_board = &self.boards[other];
@@ -111,24 +104,24 @@ pub const Game = struct {
         try player.writeMessage(.{ .turn_result = .{
             .x = x,
             .y = y,
-            .shot = protocolShot(shot),
+            .shot = protocolShot(shot, other_board),
             .who = .you,
         } });
         try other_player.writeMessage(.{ .turn_result = .{
             .x = x,
             .y = y,
-            .shot = protocolShot(shot),
+            .shot = protocolShot(shot, other_board),
             .who = .enemy,
         } });
-        return;
+        return shot;
     }
 };
 
-fn protocolShot(shot: Battleship.Shot) Protocol.Shot {
+fn protocolShot(shot: Battleship.Shot, board: *BattleshipBoard) Protocol.Shot {
     return switch (shot) {
         .Miss => .{ .miss = {} },
         .Hit => .{ .hit = {} },
-        .Sink => |ship| .{ .sink = ship.size },
+        .Sink => |id| .{ .sink = board.getShip(id).size },
     };
 }
 
@@ -249,46 +242,13 @@ pub fn play(self: *Self, view: View.Interface) !void {
     try view.startRound(&game);
     var wins = [2]u8{ 0, 0 };
     for (0..3) |_| {
+        try view.reset();
         const winner_id = try playGame(&game, view, &arena_allocator);
         try view.finishGame(winner_id, &game);
         wins[winner_id] += 1;
         _ = arena_allocator.reset(.retain_capacity);
     }
     try g.setCursor(.{ .row = 45, .col = 1 });
-}
-
-pub fn debug(
-    self: *Self,
-    name0: []const u8,
-    name1: []const u8,
-) !void {
-    var g = Graphics.init(self.stdout);
-    var arena_allocator = std.heap.ArenaAllocator.init(self.gpa);
-    defer arena_allocator.deinit();
-
-    // TODO: use entries based on name0 and name1
-    _ = name0;
-    _ = name1;
-    var game = Game.init(arena_allocator.allocator(), &self.entries[0], &self.entries[1]);
-    defer game.deinit();
-    try game.startRound();
-    var wins = [2]u8{ 0, 0 };
-    for (0..3) |i| {
-        try g.setCursor(.{ .row = 0, .col = 0 });
-        try g.eraseBelowCursor();
-        try self.stdout.print("Round {d}", .{i});
-        try self.stdout.flush();
-
-        std.Thread.sleep(1000 * std.time.ns_per_ms);
-        const winner_id = try playGame(&game, &g, &arena_allocator);
-
-        try self.stdout.print("Player {d} won!\n", .{winner_id});
-        try self.stdout.flush();
-        std.Thread.sleep(1000 * std.time.ns_per_ms);
-        wins[winner_id] += 1;
-    }
-    try self.stdout.print("Player 0: {d} wins\n", .{wins[0]});
-    try self.stdout.print("Player 1: {d} wins\n", .{wins[1]});
 }
 
 /// Returns the id of the winning player
@@ -366,8 +326,15 @@ fn playGameTurn(game: *Game, view: View.Interface, player_id: usize) !void {
 
         switch (message) {
             .turn_response => |turn| {
-                try game.takeTurn(player_id, turn.x, turn.y);
-                try view.fire(player_id, .{ .x = 5, .y = 1 }, .Hit);
+                const shot = try game.takeTurn(player_id, turn.x, turn.y);
+                try view.fire(
+                    player_id,
+                    .{
+                        .x = @intCast(turn.x),
+                        .y = @intCast(turn.y),
+                    },
+                    shot,
+                );
             },
             else => {
                 std.log.info("{s}: Unexpected message: {f}", .{ player.entry.name, message });

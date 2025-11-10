@@ -48,10 +48,16 @@ pub const Interface = union(Mode) {
         }
     }
 
-    /// Fire at player_id
+    /// player_id makes a shot at the other player
     pub fn fire(self: Interface, player_id: usize, shot: Point, kind: Battleship.Shot) !void {
         switch (self) {
             inline else => |variant| try variant.fire(player_id, shot, kind),
+        }
+    }
+
+    pub fn reset(self: Interface) !void {
+        switch (self) {
+            inline else => |variant| try variant.reset(),
         }
     }
 };
@@ -102,6 +108,11 @@ pub const Debug = struct {
         _ = player_id;
         _ = shot;
         _ = kind;
+    }
+
+    pub fn reset(self: *Debug) !void {
+        // Noop for debug
+        _ = self;
     }
 };
 
@@ -179,9 +190,7 @@ pub const Kitty = struct {
         const winsize = Graphics.measureWindow();
         if (!std.meta.eql(winsize, self.last_winsize)) {
             // On size change everything will be drawn out of place. Erase everything and start fresh
-            try self.g.setCursor(.{ .row = 1, .col = 1 });
-            try self.g.eraseBelowCursor();
-            try self.g.image(.{ .action = .delete });
+            try self.reset();
             self.last_winsize = winsize;
         }
 
@@ -251,43 +260,85 @@ pub const Kitty = struct {
         // Draw ships
         var placement_id: u32 = 1;
         inline for (0..2) |i| {
-            const player = game.boards[i].interface();
+            const board = game.boards[i].interface();
             const offset_x: u16 = @intCast(layout.offset(i * 2) + 4);
             const offset_y: u16 = grid_start + 3;
-            try self.drawPlacements(placement_id, offset_x, offset_y, player.placements);
-            placement_id += @intCast(player.placements.len);
+            try self.drawShipPlacements(placement_id, offset_x, offset_y, board);
+            placement_id += @intCast(board.placements.len);
         }
+
+        // Draw past shot marks
+        // The animation takes the 1 id, got to be a better way...
+        var shot_placement_id: u32 = 2;
+        inline for (0..2) |i| {
+            const board = game.boards[i].interface();
+            const offset_x: u16 = @intCast(layout.offset(i * 2) + 4);
+            const offset_y: u16 = grid_start + 3;
+            for (0..board.height) |y| {
+                for (0..board.width) |x| {
+                    const cell = board.at(x, y) catch unreachable;
+                    const shot = cell.shot orelse continue;
+                    const image: R = switch (shot) {
+                        .Hit, .Sink => R.hit,
+                        .Miss => R.miss,
+                    };
+                    const frame_idx = image.frames.len - 1;
+                    var opts = image.imageOptions2(frame_idx);
+                    opts.placement_id = shot_placement_id;
+                    try self.g.imagePos(
+                        offset_x + @as(u16, @intCast(x)) * 6,
+                        offset_y + @as(u16, @intCast(y)) * 3,
+                        opts,
+                    );
+
+                    shot_placement_id += 1;
+                }
+            }
+        }
+
         try self.g.stdout.flush();
     }
 
     /// Assumes Kitty.boards has already been called
     pub fn fire(self: *Kitty, player_id: usize, shot: Point, kind: Battleship.Shot) !void {
-        _ = player_id;
-        _ = kind;
+        const other_player = (player_id + 1) % 2;
         const layout = Layout.init(
             &.{ &self.spacer0_col, &self.player_cols[0], &self.spacer1_col, &self.player_cols[1] },
         );
-        const offset_x: u16 = @as(u16, @intCast(layout.offset(0) + 4)) + shot.x * 6;
+        const col_id = other_player * 2;
+        const offset_x: u16 = @as(u16, @intCast(layout.offset(col_id) + 4)) + shot.x * 6;
         const offset_y: u16 = grid_start + 3 + shot.y * 3;
-        try self.playGif(R.hit, offset_x, offset_y);
+        const gif: R = switch (kind) {
+            .Hit, .Sink => R.hit,
+            .Miss => R.miss,
+        };
+        try self.playGif(gif, offset_x, offset_y);
     }
 
-    fn drawPlacements(
+    pub fn reset(self: *Kitty) !void {
+        try self.g.setCursor(.{ .row = 1, .col = 1 });
+        try self.g.eraseBelowCursor();
+        try self.g.image(.{ .action = .delete });
+    }
+
+    fn drawShipPlacements(
         self: *Kitty,
         placement_id: u32,
         offset_x: u16,
         offset_y: u16,
-        placements: []const ?Battleship.Placement,
+        board: Battleship.BoardInterface,
     ) !void {
-        for (0..placements.len) |i| {
-            const placement = placements[i] orelse continue;
+        for (0..board.placements.len) |i| {
+            const placement = board.placements[i] orelse continue;
+            const ship = board.ships[i];
             const x = offset_x + placement.x * 6;
             const y = offset_y + placement.y * 3;
             const res = switch (placement.orientation) {
                 .Horizontal => horizontal_ships[i],
                 .Vertical => vertical_ships[i],
             };
-            var opts = res.imageOptions();
+            const frame_id: usize = if (ship.hits >= ship.size) 1 else 0;
+            var opts = res.imageOptions2(frame_id);
             const i_u32: u32 = @intCast(i);
             opts.placement_id = placement_id + i_u32;
             try self.g.imagePos(@intCast(x), y, opts);
@@ -295,7 +346,7 @@ pub const Kitty = struct {
     }
 
     fn playGif(self: *Kitty, gif: R, x: u16, y: u16) !void {
-        const sleep_time: u64 = 50;
+        const sleep_time: u64 = 10;
         for (gif.frames) |frame| {
             try self.g.imagePos(
                 x,
