@@ -82,6 +82,24 @@ pub const miss = Self{
     .rows = 2,
 };
 
+pub const winner = Self{
+    .image_file = .winner,
+    .frames = &[1]Frame{
+        .{ .x = 0, .y = 0, .w = 351, .h = 1024 },
+    },
+    .cols = 6,
+    .rows = 9,
+};
+
+pub const loser = Self{
+    .image_file = .loser,
+    .frames = &[1]Frame{
+        .{ .x = 0, .y = 0, .w = 351, .h = 1024 },
+    },
+    .cols = 6,
+    .rows = 9,
+};
+
 fn gifFrames(comptime n: usize) [n]Frame {
     var frames: [n]Frame = undefined;
     for (0..n) |i| frames[i] = .{ .x = 84 * i, .y = 0, .w = 84, .h = 84 };
@@ -89,11 +107,14 @@ fn gifFrames(comptime n: usize) [n]Frame {
 }
 
 pub const ImageFile = enum(u32) {
+    // Starting from 1 is important because these are used as Kitty image ids and 0 is invalid
     spritesheet = 1,
     water,
     ralf,
     hit,
     miss,
+    winner,
+    loser,
 
     pub fn id(self: ImageFile) u32 {
         return @intFromEnum(self);
@@ -106,6 +127,8 @@ pub const ImageFile = enum(u32) {
             .ralf => "assets/ralph.png",
             .hit => "assets/hit.png",
             .miss => "assets/miss.png",
+            .winner => "assets/winner.png",
+            .loser => "assets/loser.png",
         };
     }
 };

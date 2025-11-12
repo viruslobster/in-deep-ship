@@ -146,6 +146,8 @@ pub const Kitty = struct {
             R.ImageFile.ralf,
             R.ImageFile.hit,
             R.ImageFile.miss,
+            R.ImageFile.winner,
+            R.ImageFile.loser,
         };
         for (images) |img_file| {
             const bytes = R.load(arena_alloc, img_file) catch |err| {
@@ -175,10 +177,28 @@ pub const Kitty = struct {
     }
 
     fn finishGame(self: *Kitty, winner_id: usize, game: *const Tournament.Game) !void {
+        const loser_id = (winner_id + 1) % 2;
         _ = game;
-        try self.g.stdout.print("Player {d} won!\n", .{winner_id});
+        //const layout = self.getLayout();
+        const layout = Layout.init(
+            &.{ &self.spacer0_col, &self.player_cols[0], &self.spacer1_col, &self.player_cols[1] },
+        );
+
+        // Draw winner banner
+        {
+            const x: u16 = @intCast(layout.offset(winner_id * 2) + 20);
+            const y: u16 = 2;
+            try self.g.imagePos(x, y, R.winner.imageOptions());
+        }
+
+        // Draw loser banner
+        {
+            const x: u16 = @intCast(layout.offset(loser_id * 2) + 20);
+            const y: u16 = 2;
+            try self.g.imagePos(x, y, R.loser.imageOptions());
+        }
         try self.g.stdout.flush();
-        std.Thread.sleep(1000 * std.time.ns_per_ms);
+        std.Thread.sleep(10000 * std.time.ns_per_ms);
     }
 
     fn boards(self: *Kitty, game: *const Tournament.Game) !void {
@@ -295,7 +315,6 @@ pub const Kitty = struct {
                 }
             }
         }
-
         try self.g.stdout.flush();
     }
 
@@ -346,7 +365,7 @@ pub const Kitty = struct {
     }
 
     fn playGif(self: *Kitty, gif: R, x: u16, y: u16) !void {
-        const sleep_time: u64 = 10;
+        const sleep_time: u64 = 0;
         for (gif.frames) |frame| {
             try self.g.imagePos(
                 x,
