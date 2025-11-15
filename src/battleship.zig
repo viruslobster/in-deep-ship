@@ -9,21 +9,27 @@ pub fn Board(width: usize, height: usize, ships: []const Ship) type {
         const Self = @This();
 
         ships: [ship_len]Ship,
-        placements: [ship_len]?Placement,
+        placements: [ship_len]Placement = undefined,
         cells: [board_len]Cell,
         width: usize,
         height: usize,
 
-        pub fn init() Self {
+        /// placements must be in the same order as `ships`
+        pub fn init(placements: []const Placement) !Self {
+            if (placements.len != ship_len) return error.InvalidLenPlacements;
+            for (0..ship_len) |i| {
+                if (ships[i].size != placements[i].size) return error.InvalidShipSize;
+            }
             var cells: [board_len]Cell = undefined;
             for (&cells) |*c| c.* = .{};
-            return .{
+            var result: Self = .{
                 .ships = ships[0..ship_len].*,
                 .cells = cells,
                 .width = width,
                 .height = height,
-                .placements = .{null} ** ship_len,
             };
+            for (0..placements.len) |i| try result.place(placements[i], i);
+            return result;
         }
 
         pub fn interface(self: *const Self) BoardInterface {
@@ -55,40 +61,6 @@ pub fn Board(width: usize, height: usize, ships: []const Ship) type {
         pub fn allSunk(self: *Self) bool {
             for (&self.ships) |*s| if (s.hits < s.size) return false;
             return true;
-        }
-
-        pub fn allPlaced(self: *Self) bool {
-            for (&self.placements) |p| if (p == null) return false;
-            return true;
-        }
-
-        /// If placement is invalid board state may be dirty
-        pub fn place(self: *Self, placement: Placement) !void {
-            if (placement.x >= self.width or placement.y >= self.height)
-                return error.OutOfBounds;
-
-            const idx = for (0..self.ships.len) |i| {
-                if (self.ships[i].size == placement.size and self.placements[i] == null)
-                    break i;
-            } else {
-                return error.NoUnplacedShip;
-            };
-            self.placements[idx] = placement;
-
-            for (0..placement.size) |i| {
-                const cell = switch (placement.orientation) {
-                    .Horizontal => self.at_ptr(placement.x + i, placement.y),
-                    .Vertical => self.at_ptr(placement.x, placement.y + i),
-                } catch {
-                    std.log.err("ship does not fit: {any}", .{placement});
-                    return error.ShipDoesNotFit;
-                };
-                if (cell.ship_idx) |id| {
-                    std.log.err("Overlap: {any}", .{self.ships[id]});
-                    return error.ShipDoesNotFit;
-                }
-                cell.ship_idx = idx;
-            }
         }
 
         pub fn at_ptr(self: *Self, x: usize, y: usize) !*Cell {
@@ -156,12 +128,34 @@ pub fn Board(width: usize, height: usize, ships: []const Ship) type {
                 try sink.print("\n", .{});
             }
         }
+
+        /// If placement is invalid board state may be dirty
+        fn place(self: *Self, placement: Placement, ship_id: usize) !void {
+            if (placement.x >= self.width or placement.y >= self.height)
+                return error.OutOfBounds;
+
+            for (0..placement.size) |i| {
+                const cell = switch (placement.orientation) {
+                    .Horizontal => self.at_ptr(placement.x + i, placement.y),
+                    .Vertical => self.at_ptr(placement.x, placement.y + i),
+                } catch {
+                    std.log.err("ship does not fit: {any}", .{placement});
+                    return error.ShipDoesNotFit;
+                };
+                if (cell.ship_idx) |id| {
+                    std.log.err("Overlap: {any}", .{self.ships[id]});
+                    return error.ShipDoesNotFit;
+                }
+                cell.ship_idx = ship_id;
+            }
+            self.placements[ship_id] = placement;
+        }
     };
 }
 
 pub const BoardInterface = struct {
     ships: []const Ship,
-    placements: []const ?Placement,
+    placements: []const Placement,
     cells: []const Cell,
     width: usize,
     height: usize,
@@ -227,4 +221,13 @@ pub const Placement = struct {
     orientation: Orientation,
     x: u16,
     y: u16,
+
+    pub fn empty() Placement {
+        return .{
+            .size = 0,
+            .orientation = .Horizontal,
+            .x = 0,
+            .y = 0,
+        };
+    }
 };

@@ -348,7 +348,7 @@ pub const Kitty = struct {
         board: Battleship.BoardInterface,
     ) !void {
         for (0..board.placements.len) |i| {
-            const placement = board.placements[i] orelse continue;
+            const placement = board.placements[i];
             const ship = board.ships[i];
             const x = offset_x + placement.x * 6;
             const y = offset_y + placement.y * 3;
@@ -420,18 +420,18 @@ const grid_template =
 ;
 
 const horizontal_ships = [_]R{
-    R.carrier_horizontal,
-    R.battleship_horizontal,
-    R.cruiser_horizontal,
-    R.submarine_horizontal,
     R.destroyer_horizontal,
+    R.submarine_horizontal,
+    R.cruiser_horizontal,
+    R.battleship_horizontal,
+    R.carrier_horizontal,
 };
 const vertical_ships = [_]R{
-    R.carrier_vertical,
-    R.battleship_vertical,
-    R.cruiser_vertical,
-    R.submarine_vertical,
     R.destroyer_vertical,
+    R.submarine_vertical,
+    R.cruiser_vertical,
+    R.battleship_vertical,
+    R.carrier_vertical,
 };
 
 pub const Point = struct {

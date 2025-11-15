@@ -13,7 +13,7 @@ pub const Message = union(enum) {
     round_start: void,
     game_start: void,
     place_ships_request: void,
-    place_ships_response: []const Battleship.Placement,
+    place_ships_response: []Battleship.Placement,
     turn_request: void,
     turn_response: struct {
         x: usize,
@@ -184,7 +184,7 @@ test "message-format" {
     }
     {
         var sink = std.Io.Writer.fixed(&buffer);
-        const placements = [_]Battleship.Placement{
+        var placements = [_]Battleship.Placement{
             .{ .size = 3, .orientation = .Horizontal, .x = 0, .y = 0 },
             .{ .size = 4, .orientation = .Vertical, .x = 9, .y = 9 },
         };

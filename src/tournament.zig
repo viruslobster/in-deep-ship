@@ -15,12 +15,20 @@ entries: []const Meta.Entry,
 cwd: []const u8,
 
 const game_ships: [5]Battleship.Ship = .{
-    .{ .size = 5 },
-    .{ .size = 4 },
-    .{ .size = 3 },
-    .{ .size = 3 },
     .{ .size = 2 },
+    .{ .size = 3 },
+    .{ .size = 3 },
+    .{ .size = 4 },
+    .{ .size = 5 },
 };
+
+test "game-ships-sorted" {
+    var copy = game_ships;
+    sortShips(&copy);
+    for (0..game_ships.len) |i| {
+        try std.testing.expectEqual(game_ships[i].size, copy[i].size);
+    }
+}
 
 const game_width = 11;
 const game_height = 9;
@@ -28,22 +36,17 @@ const BattleshipBoard = Battleship.Board(game_width, game_height, &game_ships);
 pub const Game = struct {
     entries: [2]*const Meta.Entry,
     players: [2]Player,
-    boards: [2]BattleshipBoard,
-    penalties: [2]u32,
+    boards: [2]BattleshipBoard = undefined,
+    penalties: [2]u32 = [2]u32{ 0, 0 },
+    placed: u8 = 0,
 
     fn init(gpa: std.mem.Allocator, entry0: *const Meta.Entry, entry1: *const Meta.Entry) Game {
-        const boards = [2]BattleshipBoard{
-            BattleshipBoard.init(),
-            BattleshipBoard.init(),
-        };
         return .{
             .entries = [2]*const Meta.Entry{ entry0, entry1 },
             .players = [2]Player{
                 Player.init(entry0, gpa),
                 Player.init(entry1, gpa),
             },
-            .boards = boards,
-            .penalties = [2]u32{ 0, 0 },
         };
     }
 
@@ -52,8 +55,7 @@ pub const Game = struct {
     }
 
     pub fn allPlaced(self: *Game) bool {
-        for (&self.boards) |*b| if (!b.allPlaced()) return false;
-        return true;
+        return self.placed >= 2;
     }
 
     fn playerIndex(self: *Game, player: *Player) usize {
@@ -71,20 +73,18 @@ pub const Game = struct {
     }
 
     fn resetState(self: *Game) !void {
-        self.boards = [2]BattleshipBoard{
-            BattleshipBoard.init(),
-            BattleshipBoard.init(),
-        };
+        self.placed = 0;
     }
 
     fn placeShips(
         self: *Game,
         player_id: usize,
-        placements: []const Battleship.Placement,
+        placements: []Battleship.Placement,
     ) !void {
         const player = &self.players[player_id];
         const board = &self.boards[player_id];
-        placeIfValid(board, placements) catch |err| {
+        sortPlacements(placements);
+        board.* = BattleshipBoard.init(placements) catch |err| {
             std.log.err(
                 "{s}: placements '{any}' are invalid: {}",
                 .{ player.entry.name, placements, err },
@@ -92,6 +92,7 @@ pub const Game = struct {
             return error.InvalidPlacement;
         };
         std.log.info("{s}: placed ships", .{player.entry.name});
+        self.placed += 1;
         return;
     }
 
@@ -123,22 +124,6 @@ fn protocolShot(shot: Battleship.Shot, board: *BattleshipBoard) Protocol.Shot {
         .Hit => .{ .hit = {} },
         .Sink => |id| .{ .sink = board.getShip(id).size },
     };
-}
-
-fn placeIfValid(
-    board: *BattleshipBoard,
-    placements: []const Battleship.Placement,
-) !void {
-    const empty_board = BattleshipBoard.init();
-    if (!std.meta.eql(board.*, empty_board)) return error.BoardDirty;
-
-    for (placements) |placement| {
-        board.place(placement) catch |err| {
-            board.* = empty_board;
-            return err;
-        };
-    }
-    if (!board.allPlaced()) return error.NotAllShipsPlaced;
 }
 
 pub const Player = struct {
@@ -349,4 +334,24 @@ fn setNonBlocking(handle: std.fs.File.Handle) !void {
     var flags = try std.posix.fcntl(handle, std.posix.F.GETFL, 0);
     flags |= 1 << @bitOffsetOf(std.posix.O, "NONBLOCK");
     _ = try std.posix.fcntl(handle, std.posix.F.SETFL, flags);
+}
+
+fn sortShips(ships: []Battleship.Ship) void {
+    const Context = struct {
+        fn lessThan(_: @This(), ship0: Battleship.Ship, ship1: Battleship.Ship) bool {
+            return ship0.size < ship1.size;
+        }
+    };
+    const ctx = Context{};
+    std.mem.sort(Battleship.Ship, ships, ctx, Context.lessThan);
+}
+
+fn sortPlacements(placements: []Battleship.Placement) void {
+    const Context = struct {
+        fn lessThan(_: @This(), p0: Battleship.Placement, p1: Battleship.Placement) bool {
+            return p0.size < p1.size;
+        }
+    };
+    const ctx = Context{};
+    std.mem.sort(Battleship.Placement, placements, ctx, Context.lessThan);
 }

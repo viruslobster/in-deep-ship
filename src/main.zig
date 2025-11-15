@@ -91,4 +91,5 @@ test {
     std.testing.refAllDeclsRecursive(Meta);
     const R = @import("resource.zig");
     std.testing.refAllDeclsRecursive(R);
+    std.testing.refAllDeclsRecursive(Tournament);
 }
