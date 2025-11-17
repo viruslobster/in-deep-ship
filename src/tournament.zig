@@ -38,6 +38,8 @@ pub const Game = struct {
     players: [2]Player,
     boards: [2]BattleshipBoard = undefined,
     penalties: [2]u32 = [2]u32{ 0, 0 },
+    wins: [2]u32 = [2]u32{ 0, 0 },
+    losses: [2]u32 = [2]u32{ 0, 0 },
     placed: u8 = 0,
 
     fn init(gpa: std.mem.Allocator, entry0: *const Meta.Entry, entry1: *const Meta.Entry) Game {
@@ -225,12 +227,15 @@ pub fn play(self: *Self, view: View.Interface) !void {
     defer game.deinit();
     try game.startRound();
     try view.startRound(&game);
-    var wins = [2]u8{ 0, 0 };
     for (0..3) |_| {
         try view.reset();
         const winner_id = try playGame(&game, view, &arena_allocator);
+        const loser_id = (winner_id + 1) % 2;
+        game.wins[winner_id] += 1;
+        game.losses[loser_id] += 1;
+        try view.boards(&game);
         try view.finishGame(winner_id, &game);
-        wins[winner_id] += 1;
+
         _ = arena_allocator.reset(.retain_capacity);
     }
     try g.setCursor(.{ .row = 45, .col = 1 });

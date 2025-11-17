@@ -186,15 +186,25 @@ pub const Kitty = struct {
 
         // Draw winner banner
         {
-            const x: u16 = @intCast(layout.offset(winner_id * 2) + 20);
-            const y: u16 = 2;
+            var x: u16 = @intCast(layout.offset(winner_id * 2));
+            if (R.winner.cols > x) {
+                std.log.err("Screen to small to show finihsGame", .{});
+                return;
+            }
+            x -= R.winner.cols;
+            const y: u16 = 0;
             try self.g.imagePos(x, y, R.winner.imageOptions());
         }
 
         // Draw loser banner
         {
-            const x: u16 = @intCast(layout.offset(loser_id * 2) + 20);
-            const y: u16 = 2;
+            var x: u16 = @intCast(layout.offset(loser_id * 2));
+            if (R.loser.cols > x) {
+                std.log.err("Screen to small to show finihsGame", .{});
+                return;
+            }
+            x -= R.loser.cols;
+            const y: u16 = 0;
             try self.g.imagePos(x, y, R.loser.imageOptions());
         }
         try self.g.stdout.flush();
@@ -216,11 +226,21 @@ pub const Kitty = struct {
 
         // Write player columns
         var col_buffer: [256]u8 = undefined;
+        const portrait_width: usize = 18;
         inline for (0..2) |i| {
             var col_writer = self.player_cols[i].writer(&col_buffer);
             var col = &col_writer.interface;
-            try col.print("Player: {s}", .{game.entries[i].name});
-            try col.splatByteAll('\n', grid_start);
+            try col.splatByteAll(' ', portrait_width + 1);
+            try col.print("Player: {s}\n", .{game.entries[i].name});
+            try col.splatByteAll(' ', portrait_width + 1);
+            try col.print(
+                "Round: {d} wins, {d} losses, {d} penalties\n",
+                .{ game.wins[i], game.losses[i], game.penalties[i] },
+            );
+            try col.splatByteAll(' ', portrait_width + 1);
+            try col.print("Tournament: todo...\n", .{});
+
+            try col.splatByteAll('\n', grid_start - 3);
             try col.print("{s}\n", .{grid_template});
             try col.flush();
         }
@@ -255,7 +275,7 @@ pub const Kitty = struct {
         // Draw contestant pics
         inline for (0..2) |i| {
             const offset_x: u16 = @intCast(layout.offset(i * 2) + 1);
-            const offset_y: u16 = 2;
+            const offset_y: u16 = 0;
             var opts = R.ralph.imageOptions();
             opts.placement_id = i + 1;
             try self.g.imagePos(offset_x, offset_y, opts);
@@ -365,7 +385,8 @@ pub const Kitty = struct {
     }
 
     fn playGif(self: *Kitty, gif: R, x: u16, y: u16) !void {
-        var sleep_time: u64 = 55;
+        //var sleep_time: u64 = 55;
+        var sleep_time: u64 = 0;
         for (gif.frames) |frame| {
             if (sleep_time > 10) sleep_time -= 2;
 
