@@ -4,7 +4,7 @@ const Graphics = @import("graphics.zig");
 
 const Frame = struct { x: u32, y: u32, w: u32, h: u32 };
 const Self = @This();
-image_file: ImageFile,
+image: Image,
 frames: []const Frame,
 rows: u8,
 cols: u8,
@@ -12,7 +12,7 @@ cols: u8,
 pub fn imageOptions(self: *const Self) Graphics.ImageOptions {
     return .{
         .action = .put,
-        .image_id = self.image_file.id(),
+        .image_id = self.image.id,
         .rows = self.rows,
         .cols = self.cols,
         .source_rect = .{
@@ -27,7 +27,7 @@ pub fn imageOptions(self: *const Self) Graphics.ImageOptions {
 pub fn imageOptions2(self: *const Self, frame_idx: usize) Graphics.ImageOptions {
     return .{
         .action = .put,
-        .image_id = self.image_file.id(),
+        .image_id = self.image.id,
         .rows = self.rows,
         .cols = self.cols,
         .source_rect = .{
@@ -49,50 +49,36 @@ pub const submarine_vertical = shipSprite("submarine-vertical", .{ .cols = 5, .r
 pub const submarine_horizontal = shipSprite("submarine-horizontal", .{ .cols = 17, .rows = 2 });
 pub const destroyer_vertical = shipSprite("destroyer-vertical", .{ .cols = 5, .rows = 5 });
 pub const destroyer_horizontal = shipSprite("destroyer-horizontal", .{ .cols = 11, .rows = 2 });
-
-pub const ralph = Self{
-    .image_file = .ralf,
-    .frames = &[1]Frame{
-        .{ .x = 0, .y = 0, .w = 300, .h = 300 },
-    },
-    .cols = 9 * 2,
-    .rows = 9,
-};
-
 pub const water = Self{
-    .image_file = .water,
+    .image = .water,
     .frames = &[1]Frame{
         .{ .x = 0, .y = 0, .w = 959, .h = 879 },
     },
     .cols = 66,
     .rows = 27,
 };
-
 pub const hit = Self{
-    .image_file = .hit,
+    .image = .hit,
     .frames = &gifFrames(55),
     .cols = 5,
     .rows = 2,
 };
-
 pub const miss = Self{
-    .image_file = .miss,
+    .image = .miss,
     .frames = &gifFrames(51),
     .cols = 5,
     .rows = 2,
 };
-
 pub const winner = Self{
-    .image_file = .winner,
+    .image = .winner,
     .frames = &[1]Frame{
         .{ .x = 0, .y = 0, .w = 351, .h = 1024 },
     },
     .cols = 6,
     .rows = 9,
 };
-
 pub const loser = Self{
-    .image_file = .loser,
+    .image = .loser,
     .frames = &[1]Frame{
         .{ .x = 0, .y = 0, .w = 351, .h = 1024 },
     },
@@ -106,48 +92,75 @@ fn gifFrames(comptime n: usize) [n]Frame {
     return frames;
 }
 
-pub const ImageFile = enum(u32) {
-    // Starting from 1 is important because these are used as Kitty image ids and 0 is invalid
-    spritesheet = 1,
-    water,
-    ralf,
-    hit,
-    miss,
-    winner,
-    loser,
+pub const Image = struct {
+    var next_id: u32 = static.len + 1;
+    id: u32,
+    bytes: []const u8,
 
-    pub fn id(self: ImageFile) u32 {
-        return @intFromEnum(self);
-    }
-
-    fn path(self: ImageFile) []const u8 {
-        return switch (self) {
-            .spritesheet => "assets/spritesheet.png",
-            .water => "assets/water.png",
-            .ralf => "assets/ralph.png",
-            .hit => "assets/hit.png",
-            .miss => "assets/miss.png",
-            .winner => "assets/winner.png",
-            .loser => "assets/loser.png",
+    pub fn init(bytes: []const u8) Image {
+        const id: u32 = next_id;
+        next_id += 1;
+        return .{
+            .id = id,
+            .bytes = bytes,
         };
     }
+
+    pub fn initId(id: u32, bytes: []const u8) Image {
+        return .{
+            .id = id,
+            .bytes = bytes,
+        };
+    }
+
+    // Dynamic images are loaded at runtime
+    var dynamic_by_name: std.StringArrayHashMapUnmanaged(Image) = .empty;
+    pub fn dynamic(gpa: std.mem.Allocator, path: []const u8) !Image {
+        if (dynamic_by_name.get(path)) |image| return image;
+
+        const bytes = try load(gpa, path);
+        const image = init(bytes);
+        try dynamic_by_name.put(gpa, path, image);
+        return image;
+    }
+
+    pub fn dynamicNoAlloc(path: []const u8) !Image {
+        if (dynamic_by_name.get(path)) |image| return image;
+        return error.ImageNotLoaded;
+    }
+
+    pub fn markTransmitted(path: []const u8) void {
+        _ = path;
+        // TODO
+    }
+
+    fn load(gpa: std.mem.Allocator, path: []const u8) ![]u8 {
+        const file = std.fs.openFileAbsolute(path, .{ .mode = .read_only }) catch |err| {
+            std.log.err("open: {s}", .{path});
+            return err;
+        };
+        defer file.close();
+        const stat = try file.stat();
+        return try file.readToEndAlloc(gpa, stat.size);
+    }
+
+    // Static images are compiled in
+    // Starting from 1 is important because these are used as Kitty image ids and 0 is invalid
+    pub const spritesheet = initId(1, @embedFile("assets/spritesheet.png"));
+    pub const water = initId(2, @embedFile("assets/water.png"));
+    pub const hit = initId(3, @embedFile("assets/hit.png"));
+    pub const miss = initId(4, @embedFile("assets/miss.png"));
+    pub const winner = initId(5, @embedFile("assets/winner.png"));
+    pub const loser = initId(6, @embedFile("assets/loser.png"));
+    pub const static = [_]*const Image{
+        &Image.spritesheet,
+        &Image.water,
+        &Image.hit,
+        &Image.miss,
+        &Image.winner,
+        &Image.loser,
+    };
 };
-
-pub fn load(gpa: std.mem.Allocator, image: ImageFile) ![]u8 {
-    var dir_buffer: [std.fs.max_path_bytes]u8 = undefined;
-    const dir = try std.posix.getcwd(&dir_buffer);
-
-    var full_path_buffer: [std.fs.max_path_bytes]u8 = undefined;
-    var fixed = std.heap.FixedBufferAllocator.init(&full_path_buffer);
-    const full_path = try std.fs.path.join(
-        fixed.allocator(),
-        &.{ dir, image.path() },
-    );
-    const file = try std.fs.openFileAbsolute(full_path, .{ .mode = .read_only });
-    defer file.close();
-    const stat = try file.stat();
-    return try file.readToEndAlloc(gpa, stat.size);
-}
 
 pub const SpriteMeta = packed struct {
     const Rect = packed struct {
@@ -209,7 +222,7 @@ fn shipSprite(name: []const u8, opts: struct { rows: u8, cols: u8 }) Self {
     const frame_sunk = shipSpriteFrame(name_sunk);
 
     return Self{
-        .image_file = .spritesheet,
+        .image = .spritesheet,
         .frames = &[2]Frame{
             .{ .x = frame.x, .y = frame.y, .w = frame.w, .h = frame.h },
             .{ .x = frame_sunk.x, .y = frame_sunk.y, .w = frame_sunk.w, .h = frame_sunk.h },
@@ -226,4 +239,15 @@ fn shipSpriteFrame(name: []const u8) SpriteMeta.Rect {
         return sprite.value.frame;
     }
     @compileError("Failed to load sprite");
+}
+
+pub fn portraitNoAlloc(path: []const u8) !Self {
+    return .{
+        .image = try Image.dynamicNoAlloc(path),
+        .frames = &[1]Frame{
+            .{ .x = 0, .y = 0, .w = 300, .h = 300 },
+        },
+        .cols = 19,
+        .rows = 9,
+    };
 }

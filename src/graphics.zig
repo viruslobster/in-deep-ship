@@ -70,7 +70,7 @@ fn imageHeader(self: *Self, opts: ImageOptions) !void {
     try self.stdout.print(";", .{});
 }
 
-pub fn imageBytes(self: *Self, bytes: []u8, opts: ImageOptions) !void {
+pub fn imageBytes(self: *Self, bytes: []const u8, opts: ImageOptions) !void {
     try self.imageHeader(opts);
     try std.base64.standard.Encoder.encodeWriter(self.stdout, bytes);
     try self.stdout.print("\x1b\\", .{});

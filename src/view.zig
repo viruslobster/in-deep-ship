@@ -24,9 +24,13 @@ pub const Interface = union(Mode) {
         }
     }
 
-    pub fn alloc(self: Interface, gpa: std.mem.Allocator) !void {
+    pub fn alloc(
+        self: Interface,
+        gpa: std.mem.Allocator,
+        game: *const Tournament.Game,
+    ) !void {
         switch (self) {
-            inline else => |variant| try variant.alloc(gpa),
+            inline else => |variant| try variant.alloc(gpa, game),
         }
     }
 
@@ -74,9 +78,10 @@ pub const Debug = struct {
         _ = gpa;
     }
 
-    fn alloc(self: *Debug, gpa: std.mem.Allocator) !void {
+    fn alloc(self: *Debug, gpa: std.mem.Allocator, game: *const Tournament.Game) !void {
         _ = gpa;
         _ = self;
+        _ = game;
     }
 
     fn startRound(self: *Debug, game: *const Tournament.Game) !void {
@@ -135,30 +140,23 @@ pub const Kitty = struct {
         self.g.stdout.flush() catch |err| std.log.err("flush: {}", .{err});
     }
 
-    fn alloc(self: *Kitty, gpa: std.mem.Allocator) !void {
-        var arena = std.heap.ArenaAllocator.init(gpa);
-        defer arena.deinit();
-        const arena_alloc = arena.allocator();
-
-        const images: []const R.ImageFile = &.{
-            R.ImageFile.spritesheet,
-            R.ImageFile.water,
-            R.ImageFile.ralf,
-            R.ImageFile.hit,
-            R.ImageFile.miss,
-            R.ImageFile.winner,
-            R.ImageFile.loser,
-        };
-        for (images) |img_file| {
-            const bytes = R.load(arena_alloc, img_file) catch |err| {
-                std.log.err("load file: {any}", .{img_file});
-                return err;
-            };
+    fn alloc(self: *Kitty, gpa: std.mem.Allocator, game: *const Tournament.Game) !void {
+        for (&R.Image.static) |image| {
+            //if (image.transmitted) continue;
             try self.g.imageBytes(
-                bytes,
-                .{ .image_id = img_file.id(), .action = .transmit },
+                image.bytes,
+                .{ .image_id = image.id, .action = .transmit },
             );
-            _ = arena.reset(.retain_capacity);
+            //image.transmitted = true;
+        }
+        for (0..2) |i| {
+            const image = try R.Image.dynamic(gpa, game.players[i].entry.img);
+            //if (image.transmitted) continue;
+            try self.g.imageBytes(
+                image.bytes,
+                .{ .image_id = image.id, .action = .transmit },
+            );
+            //R.Image.markTransmitted(game.players[i].entry.img);
         }
         self.player_cols[0] = try Layout.Column.init(gpa, 100, 100);
         self.player_cols[1] = try Layout.Column.init(gpa, 100, 100);
@@ -179,7 +177,6 @@ pub const Kitty = struct {
     fn finishGame(self: *Kitty, winner_id: usize, game: *const Tournament.Game) !void {
         const loser_id = (winner_id + 1) % 2;
         _ = game;
-        //const layout = self.getLayout();
         const layout = Layout.init(
             &.{ &self.spacer0_col, &self.player_cols[0], &self.spacer1_col, &self.player_cols[1] },
         );
@@ -276,7 +273,8 @@ pub const Kitty = struct {
         inline for (0..2) |i| {
             const offset_x: u16 = @intCast(layout.offset(i * 2) + 1);
             const offset_y: u16 = 0;
-            var opts = R.ralph.imageOptions();
+            const res = try R.portraitNoAlloc(game.players[i].entry.img);
+            var opts = res.imageOptions();
             opts.placement_id = i + 1;
             try self.g.imagePos(offset_x, offset_y, opts);
         }
@@ -395,7 +393,7 @@ pub const Kitty = struct {
                 y,
                 .{
                     .action = .put,
-                    .image_id = gif.image_file.id(),
+                    .image_id = gif.image.id,
                     .placement_id = 1,
                     .source_rect = .{ .x = frame.x, .y = frame.y, .w = frame.w, .h = frame.h },
                     .zindex = 1,

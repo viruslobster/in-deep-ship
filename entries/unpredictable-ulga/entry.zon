@@ -1,6 +1,6 @@
 .{
     .name = "Unpredictable Ulga",
     .runnable = "src/main.py",
-    .img = "assets/ralph.jpg",
+    .img = "assets/ulga.png",
     .emote = "assets/kaboom.mp3",
 }

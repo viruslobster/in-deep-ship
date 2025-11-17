@@ -214,7 +214,6 @@ pub const Player = struct {
 };
 
 pub fn play(self: *Self, view: View.Interface) !void {
-    try view.alloc(self.gpa);
     var g = Graphics.init(self.stdout);
     // Clear any previous images
     try g.image(.{ .action = .delete });
@@ -225,6 +224,7 @@ pub fn play(self: *Self, view: View.Interface) !void {
     // TODO: don't just use the first two entries
     var game = Game.init(arena_allocator.allocator(), &self.entries[0], &self.entries[1]);
     defer game.deinit();
+    try view.alloc(self.gpa, &game);
     try game.startRound();
     try view.startRound(&game);
     for (0..3) |_| {

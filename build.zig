@@ -30,10 +30,12 @@ pub fn build(b: *std.Build) !void {
             .optimize = optimize,
         }),
     });
-    exe.root_module.addAnonymousImport(
-        "assets/spritesheet.bin",
-        .{ .root_source_file = b.path("assets/spritesheet.bin") },
-    );
+    for (&resources) |resource| {
+        exe.root_module.addAnonymousImport(
+            resource,
+            .{ .root_source_file = b.path(resource) },
+        );
+    }
     exe.step.dependOn(&run_resource_gen.step);
     b.installArtifact(exe);
     const run_step = b.step("run", "Run the app");
@@ -51,3 +53,13 @@ pub fn build(b: *std.Build) !void {
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_exe_tests.step);
 }
+
+const resources = [_][]const u8{
+    "assets/spritesheet.bin",
+    "assets/spritesheet.png",
+    "assets/water.png",
+    "assets/hit.png",
+    "assets/miss.png",
+    "assets/winner.png",
+    "assets/loser.png",
+};

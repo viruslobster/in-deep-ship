@@ -1,6 +1,6 @@
 .{
     .name = "Random Ralph",
     .runnable = "src/main.py",
-    .img = "assets/ralph.jpg",
+    .img = "assets/ralph.png",
     .emote = "assets/kaboom.mp3",
 }
