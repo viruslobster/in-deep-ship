@@ -23,7 +23,7 @@ pub fn build(b: *std.Build) !void {
     run_resource_gen.addArg(out_path.getPath(b));
 
     const exe = b.addExecutable(.{
-        .name = "in_deep_ship",
+        .name = "in-deep-ship",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
             .target = target,

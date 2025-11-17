@@ -198,7 +198,7 @@ pub const Kitty = struct {
             try self.g.imagePos(x, y, R.loser.imageOptions());
         }
         try self.g.stdout.flush();
-        std.Thread.sleep(10000 * std.time.ns_per_ms);
+        std.Thread.sleep(5000 * std.time.ns_per_ms);
     }
 
     fn boards(self: *Kitty, game: *const Tournament.Game) !void {
@@ -365,8 +365,10 @@ pub const Kitty = struct {
     }
 
     fn playGif(self: *Kitty, gif: R, x: u16, y: u16) !void {
-        const sleep_time: u64 = 0;
+        var sleep_time: u64 = 55;
         for (gif.frames) |frame| {
+            if (sleep_time > 10) sleep_time -= 2;
+
             try self.g.imagePos(
                 x,
                 y,

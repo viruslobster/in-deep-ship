@@ -274,7 +274,6 @@ fn playGame(game: *Game, view: View.Interface, arena_alloc: *std.heap.ArenaAlloc
     // TODO: randomize player_id
     while (true) {
         try view.boards(game);
-        try playGameTurn(game, view, player_id);
 
         if (game.boards[0].allSunk()) {
             try game.players[0].writeMessage(.{ .lose = {} });
@@ -285,6 +284,8 @@ fn playGame(game: *Game, view: View.Interface, arena_alloc: *std.heap.ArenaAlloc
             try game.players[1].writeMessage(.{ .lose = {} });
             return 0;
         }
+
+        try playGameTurn(game, view, player_id);
 
         player_id = (player_id + 1) % 2;
         _ = arena_alloc.reset(.retain_capacity);
