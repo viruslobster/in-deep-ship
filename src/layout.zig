@@ -101,9 +101,9 @@ pub const ColumnWriter = struct {
         data: []const u8,
     ) std.Io.Writer.Error!usize {
         var n: usize = 0;
-        while (data[n] != '\n') n += 1;
+        while (n < data.len and data[n] != '\n') n += 1;
         try self.column.writeRowBytes(data[0..n]);
-        if (data[n] == '\n') {
+        if (n < data.len and data[n] == '\n') {
             try self.column.newRow();
             n += 1;
         }

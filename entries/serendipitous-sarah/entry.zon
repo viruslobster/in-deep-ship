@@ -1,0 +1,6 @@
+.{
+    .name = "Serendipitous Sarah",
+    .runnable = "src/main.py",
+    .img = "assets/ralph.png",
+    .emote = "assets/kaboom.mp3",
+}

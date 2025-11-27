@@ -2,6 +2,7 @@ const std = @import("std");
 
 const Battleship = @import("battleship.zig");
 const Layout = @import("layout.zig");
+const Meta = @import("meta.zig");
 const Graphics = @import("graphics.zig");
 const R = @import("resource.zig");
 const Tournament = @import("tournament.zig");
@@ -24,13 +25,9 @@ pub const Interface = union(Mode) {
         }
     }
 
-    pub fn alloc(
-        self: Interface,
-        gpa: std.mem.Allocator,
-        game: *const Tournament.Game,
-    ) !void {
+    pub fn alloc(self: Interface, entries: []const Meta.Entry) !void {
         switch (self) {
-            inline else => |variant| try variant.alloc(gpa, game),
+            inline else => |variant| try variant.alloc(entries),
         }
     }
 
@@ -46,9 +43,19 @@ pub const Interface = union(Mode) {
         }
     }
 
-    pub fn boards(self: Interface, game: *const Tournament.Game) !void {
+    pub fn leaderboard(
+        self: Interface,
+        entries: []const Meta.Entry,
+        scores: []const Tournament.Score,
+    ) !void {
         switch (self) {
-            inline else => |variant| try variant.boards(game),
+            inline else => |variant| try variant.leaderboard(entries, scores),
+        }
+    }
+
+    pub fn turn(self: Interface, game: *const Tournament.Game) !void {
+        switch (self) {
+            inline else => |variant| try variant.turn(game),
         }
     }
 
@@ -59,9 +66,9 @@ pub const Interface = union(Mode) {
         }
     }
 
-    pub fn reset(self: Interface) !void {
+    pub fn clear(self: Interface) !void {
         switch (self) {
-            inline else => |variant| try variant.reset(),
+            inline else => |variant| try variant.clear(),
         }
     }
 };
@@ -78,10 +85,21 @@ pub const Debug = struct {
         _ = gpa;
     }
 
-    fn alloc(self: *Debug, gpa: std.mem.Allocator, game: *const Tournament.Game) !void {
-        _ = gpa;
+    fn alloc(self: *Debug, entries: []const Meta.Entry) !void {
         _ = self;
-        _ = game;
+        _ = entries;
+    }
+
+    pub fn leaderboard(
+        self: *Debug,
+        entries: []const Meta.Entry,
+        scores: []const Tournament.Score,
+    ) !void {
+        std.debug.assert(entries.len == scores.len);
+        for (0..entries.len) |i| {
+            try self.g.stdout.print("{s}: {any}\n", .{ entries[i].name, scores[i] });
+        }
+        try self.g.stdout.flush();
     }
 
     fn startRound(self: *Debug, game: *const Tournament.Game) !void {
@@ -99,7 +117,7 @@ pub const Debug = struct {
         std.Thread.sleep(1000 * std.time.ns_per_ms);
     }
 
-    fn boards(self: *Debug, game: *const Tournament.Game) !void {
+    fn turn(self: *Debug, game: *const Tournament.Game) !void {
         try self.g.setCursor(.{ .row = 0, .col = 0 });
         try self.g.eraseBelowCursor();
         try self.g.stdout.print("Player 0: \n{f}", .{game.boards[0]});
@@ -115,7 +133,7 @@ pub const Debug = struct {
         _ = kind;
     }
 
-    pub fn reset(self: *Debug) !void {
+    pub fn clear(self: *Debug) !void {
         // Noop for debug
         _ = self;
     }
@@ -125,45 +143,131 @@ pub const Kitty = struct {
     const grid_start: u16 = 11;
 
     g: Graphics,
+    gpa: std.mem.Allocator,
     spacer0_col: Layout.Column = undefined,
     spacer1_col: Layout.Column = undefined,
-    player_cols: [2]Layout.Column = undefined,
+    content0_col: Layout.Column = undefined,
+    content1_col: Layout.Column = undefined,
     last_winsize: std.posix.winsize = .{ .col = 0, .row = 0, .xpixel = 0, .ypixel = 0 },
 
-    pub fn init(stdout: *std.Io.Writer) Kitty {
-        return .{ .g = Graphics.init(stdout) };
+    pub fn init(gpa: std.mem.Allocator, stdout: *std.Io.Writer) Kitty {
+        return .{ .g = Graphics.init(stdout), .gpa = gpa };
     }
 
-    pub fn deinit(self: *Kitty, gpa: std.mem.Allocator) void {
-        _ = gpa;
+    pub fn deinit(self: *Kitty) void {
         self.g.showCursor() catch |err| std.log.err("couldn't show cursor: {}", .{err});
         self.g.stdout.flush() catch |err| std.log.err("flush: {}", .{err});
     }
 
-    fn alloc(self: *Kitty, gpa: std.mem.Allocator, game: *const Tournament.Game) !void {
+    fn alloc(self: *Kitty, entries: []const Meta.Entry) !void {
+        const start_ts = std.time.milliTimestamp();
         for (&R.Image.static) |image| {
-            //if (image.transmitted) continue;
             try self.g.imageBytes(
                 image.bytes,
                 .{ .image_id = image.id, .action = .transmit },
             );
-            //image.transmitted = true;
         }
-        for (0..2) |i| {
-            const image = try R.Image.dynamic(gpa, game.players[i].entry.img);
-            //if (image.transmitted) continue;
+        for (entries) |entry| {
+            const image = try R.Image.dynamic(self.gpa, entry.img);
             try self.g.imageBytes(
                 image.bytes,
                 .{ .image_id = image.id, .action = .transmit },
             );
-            //R.Image.markTransmitted(game.players[i].entry.img);
         }
-        self.player_cols[0] = try Layout.Column.init(gpa, 100, 100);
-        self.player_cols[1] = try Layout.Column.init(gpa, 100, 100);
-        self.spacer0_col = try Layout.Column.init(gpa, 1, 100);
-        self.spacer1_col = try Layout.Column.init(gpa, 1, 100);
+        self.content0_col = try Layout.Column.init(self.gpa, 100, 100);
+        self.content1_col = try Layout.Column.init(self.gpa, 100, 100);
+        self.spacer0_col = try Layout.Column.init(self.gpa, 1, 100);
+        self.spacer1_col = try Layout.Column.init(self.gpa, 1, 100);
         try self.g.hideCursor();
+        const elapsed = std.time.milliTimestamp() - start_ts;
+        std.log.info("Took {d}ms to send image bytes", .{elapsed});
         // TODO: disable being able to type
+    }
+
+    pub fn leaderboard(
+        self: *Kitty,
+        entries: []const Meta.Entry,
+        scores: []const Tournament.Score,
+    ) !void {
+        std.debug.assert(entries.len == scores.len);
+        self.resetCols();
+        try self.clear();
+        const winsize = Graphics.measureWindow();
+        const img_rows = 3;
+        const img_cols = 6;
+        const space_between_rows = 1;
+        // Above this number of rows we will use two columns
+        const two_col_threshold = winsize.row / (img_rows + space_between_rows);
+        // We only draw this many entries
+        const limit = two_col_threshold * 2 - 1;
+
+        var buffer0: [256]u8 = undefined;
+        var content_writer0 = self.content0_col.writer(&buffer0);
+        const content0 = &content_writer0.interface;
+
+        var buffer1: [256]u8 = undefined;
+        var content_writer1 = self.content1_col.writer(&buffer1);
+        const content1 = &content_writer1.interface;
+
+        var spacer_writer0 = self.spacer0_col.writer(&.{});
+        const spacer0 = &spacer_writer0.interface;
+
+        var spacer_writer1 = self.spacer1_col.writer(&.{});
+        const spacer1 = &spacer_writer1.interface;
+        try spacer1.splatByteAll(' ', 10);
+        try spacer1.flush();
+
+        // Vertically center text with image
+        try content0.splatByteAll('\n', img_rows / 2);
+        try content1.splatByteAll('\n', img_rows / 2);
+
+        // Write entry names from highest to lowest score
+        var ordered_indices = try sortByScore(self.gpa, scores);
+        ordered_indices = ordered_indices[0..limit];
+        defer self.gpa.free(ordered_indices);
+
+        for (ordered_indices, 1..) |i, place| {
+            const content = if (place <= two_col_threshold) content0 else content1;
+            try content.splatByteAll(' ', img_cols);
+            try content.print("{d}. {s}: {f}\n", .{ place, entries[i].name, scores[i] });
+            if (place != two_col_threshold)
+                try content.splatByteAll('\n', space_between_rows + img_rows - 1);
+        }
+        if (entries.len > limit) try content1.print("...", .{});
+        try content0.flush();
+        try content1.flush();
+
+        // Center the list in the window
+        const cols = if (entries.len <= two_col_threshold)
+            &.{ &self.spacer0_col, &self.content0_col }
+        else
+            &.{ &self.spacer0_col, &self.content0_col, &self.spacer1_col, &self.content1_col };
+
+        const layout = Layout.init(cols);
+        const left_margin = (winsize.col - layout.width()) / 2;
+        try spacer0.splatByteAll(' ', left_margin);
+        try spacer0.flush();
+
+        // Render text
+        try self.g.stdout.print("{f}", .{layout});
+
+        // Draw entry images
+        var img_y: u16 = 1;
+        for (ordered_indices, 1..) |i, place| {
+            const offset = if (place <= two_col_threshold) layout.offset(0) else layout.offset(2);
+            const img_x: u16 = @intCast(offset);
+            const res = try R.portraitNoAlloc(entries[i].img);
+            var opts = res.imageOptions();
+            opts.rows = img_rows;
+            opts.cols = img_cols;
+            try self.g.imagePos(img_x, img_y, opts);
+            img_y += img_rows;
+            img_y += space_between_rows;
+            if (place == two_col_threshold) img_y = 1;
+        }
+        try self.g.stdout.flush();
+        std.Thread.sleep(5000 * std.time.ns_per_ms);
+        try self.clear();
     }
 
     fn startRound(self: *Kitty, game: *const Tournament.Game) !void {
@@ -178,7 +282,7 @@ pub const Kitty = struct {
         const loser_id = (winner_id + 1) % 2;
         _ = game;
         const layout = Layout.init(
-            &.{ &self.spacer0_col, &self.player_cols[0], &self.spacer1_col, &self.player_cols[1] },
+            &.{ &self.spacer0_col, &self.content0_col, &self.spacer1_col, &self.content1_col },
         );
 
         // Draw winner banner
@@ -208,16 +312,14 @@ pub const Kitty = struct {
         std.Thread.sleep(5000 * std.time.ns_per_ms);
     }
 
-    fn boards(self: *Kitty, game: *const Tournament.Game) !void {
-        self.spacer0_col.reset();
-        self.spacer1_col.reset();
-        for (&self.player_cols) |*c| c.reset();
+    fn turn(self: *Kitty, game: *const Tournament.Game) !void {
+        self.resetCols();
         try self.g.setCursor(.{ .row = 0, .col = 0 });
 
         const winsize = Graphics.measureWindow();
         if (!std.meta.eql(winsize, self.last_winsize)) {
             // On size change everything will be drawn out of place. Erase everything and start fresh
-            try self.reset();
+            try self.clear();
             self.last_winsize = winsize;
         }
 
@@ -225,17 +327,17 @@ pub const Kitty = struct {
         var col_buffer: [256]u8 = undefined;
         const portrait_width: usize = 18;
         inline for (0..2) |i| {
-            var col_writer = self.player_cols[i].writer(&col_buffer);
+            var col_writer = if (i == 0) self.content0_col.writer(&col_buffer) else self.content1_col.writer(&col_buffer);
             var col = &col_writer.interface;
             try col.splatByteAll(' ', portrait_width + 1);
-            try col.print("Player: {s}\n", .{game.entries[i].name});
+            try col.print(" Player: {s}\n", .{game.entries[i].name});
             try col.splatByteAll(' ', portrait_width + 1);
             try col.print(
-                "Round: {d} wins, {d} losses, {d} penalties\n",
-                .{ game.wins[i], game.losses[i], game.penalties[i] },
+                " Round: {d} wins, {d} losses, {d} penalties\n",
+                .{ game.scores[i].wins, game.scores[i].losses, game.scores[i].penalties },
             );
             try col.splatByteAll(' ', portrait_width + 1);
-            try col.print("Tournament: todo...\n", .{});
+            try col.print(" Tournament: todo...\n", .{});
 
             try col.splatByteAll('\n', grid_start - 3);
             try col.print("{s}\n", .{grid_template});
@@ -248,7 +350,7 @@ pub const Kitty = struct {
         try spacer1.splatByteAll(' ', 5);
 
         const layout = Layout.init(
-            &.{ &self.spacer0_col, &self.player_cols[0], &self.spacer1_col, &self.player_cols[1] },
+            &.{ &self.spacer0_col, &self.content0_col, &self.spacer1_col, &self.content1_col },
         );
         if (winsize.col < layout.width() or winsize.row < layout.height() + 1) {
             try self.g.stdout.print("Window is too small to render game. Increase window size or decrease font size.", .{});
@@ -340,7 +442,7 @@ pub const Kitty = struct {
     pub fn fire(self: *Kitty, player_id: usize, shot: Point, kind: Battleship.Shot) !void {
         const other_player = (player_id + 1) % 2;
         const layout = Layout.init(
-            &.{ &self.spacer0_col, &self.player_cols[0], &self.spacer1_col, &self.player_cols[1] },
+            &.{ &self.spacer0_col, &self.content0_col, &self.spacer1_col, &self.content1_col },
         );
         const col_id = other_player * 2;
         const offset_x: u16 = @as(u16, @intCast(layout.offset(col_id) + 4)) + shot.x * 6;
@@ -352,7 +454,7 @@ pub const Kitty = struct {
         try self.playGif(gif, offset_x, offset_y);
     }
 
-    pub fn reset(self: *Kitty) !void {
+    pub fn clear(self: *Kitty) !void {
         try self.g.setCursor(.{ .row = 1, .col = 1 });
         try self.g.eraseBelowCursor();
         try self.g.image(.{ .action = .delete });
@@ -405,7 +507,33 @@ pub const Kitty = struct {
             std.Thread.sleep(sleep_time * std.time.ns_per_ms);
         }
     }
+
+    fn resetCols(self: *Kitty) void {
+        self.spacer0_col.reset();
+        self.spacer1_col.reset();
+        self.content0_col.reset();
+        self.content1_col.reset();
+    }
 };
+
+/// Returns a slice of indices that gives the sorted order of scores by scores[i].value()
+/// from low to high
+fn sortByScore(gpa: std.mem.Allocator, scores: []const Tournament.Score) ![]usize {
+    const ordered_indices = try gpa.alloc(usize, scores.len);
+    for (0..scores.len) |i| ordered_indices[i] = i;
+
+    const Context = struct {
+        scores: []const Tournament.Score,
+
+        pub fn lessThan(this: *@This(), idx0: usize, idx1: usize) bool {
+            return this.scores[idx0].value() > this.scores[idx1].value();
+        }
+    };
+    var ctx = Context{ .scores = scores };
+    std.mem.sort(usize, ordered_indices, &ctx, Context.lessThan);
+    return ordered_indices;
+}
+
 var debug_rng = std.Random.DefaultPrng.init(0);
 
 const grid_template =

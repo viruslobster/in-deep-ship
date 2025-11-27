@@ -12,7 +12,33 @@ stdin: *std.Io.Reader,
 stdout: *std.Io.Writer,
 random: std.Random,
 entries: []const Meta.Entry,
+scores: []Score,
 cwd: []const u8,
+
+pub fn init(
+    gpa: std.mem.Allocator,
+    stdin: *std.Io.Reader,
+    stdout: *std.Io.Writer,
+    random: std.Random,
+    entries: []const Meta.Entry,
+    cwd: []u8,
+) !Self {
+    const scores = try gpa.alloc(Score, entries.len);
+    for (scores) |*s| s.* = .{};
+    return .{
+        .gpa = gpa,
+        .stdin = stdin,
+        .stdout = stdout,
+        .random = random,
+        .entries = entries,
+        .cwd = cwd,
+        .scores = scores,
+    };
+}
+
+pub fn deinit(self: *Self) void {
+    self.gpa.free(self.scores);
+}
 
 const game_ships: [5]Battleship.Ship = .{
     .{ .size = 2 },
@@ -37,9 +63,7 @@ pub const Game = struct {
     entries: [2]*const Meta.Entry,
     players: [2]Player,
     boards: [2]BattleshipBoard = undefined,
-    penalties: [2]u32 = [2]u32{ 0, 0 },
-    wins: [2]u32 = [2]u32{ 0, 0 },
-    losses: [2]u32 = [2]u32{ 0, 0 },
+    scores: [2]Score = [2]Score{ .{}, .{} },
     placed: u8 = 0,
 
     fn init(gpa: std.mem.Allocator, entry0: *const Meta.Entry, entry1: *const Meta.Entry) Game {
@@ -224,16 +248,17 @@ pub fn play(self: *Self, view: View.Interface) !void {
     // TODO: don't just use the first two entries
     var game = Game.init(arena_allocator.allocator(), &self.entries[0], &self.entries[1]);
     defer game.deinit();
-    try view.alloc(self.gpa, &game);
+    try view.alloc(self.entries);
+    try view.leaderboard(self.entries, self.scores);
     try game.startRound();
     try view.startRound(&game);
     for (0..3) |_| {
-        try view.reset();
+        try view.clear();
         const winner_id = try playGame(&game, view, &arena_allocator);
         const loser_id = (winner_id + 1) % 2;
-        game.wins[winner_id] += 1;
-        game.losses[loser_id] += 1;
-        try view.boards(&game);
+        game.scores[winner_id].wins += 1;
+        game.scores[loser_id].losses += 1;
+        try view.turn(&game);
         try view.finishGame(winner_id, &game);
 
         _ = arena_allocator.reset(.retain_capacity);
@@ -278,7 +303,7 @@ fn playGame(game: *Game, view: View.Interface, arena_alloc: *std.heap.ArenaAlloc
     // Take turns
     // TODO: randomize player_id
     while (true) {
-        try view.boards(game);
+        try view.turn(game);
 
         if (game.boards[0].allSunk()) {
             try game.players[0].writeMessage(.{ .lose = {} });
@@ -312,7 +337,7 @@ fn playGameTurn(game: *Game, view: View.Interface, player_id: usize) !void {
         const elapsed = std.time.milliTimestamp() - t0;
         if (elapsed > 1010) {
             std.log.info("{s} took too long to respond!", .{player.entry.name});
-            game.penalties[player_id] += 1;
+            game.scores[player_id].penalties += 1;
         }
 
         switch (message) {
@@ -361,3 +386,31 @@ fn sortPlacements(placements: []Battleship.Placement) void {
     const ctx = Context{};
     std.mem.sort(Battleship.Placement, placements, ctx, Context.lessThan);
 }
+
+pub const Score = struct {
+    wins: i32 = 0,
+    losses: i32 = 0,
+    penalties: i32 = 0,
+
+    pub fn value(self: Score) i32 {
+        return 10 * (self.wins - self.losses) - self.penalties;
+    }
+
+    pub fn format(self: Score, sink: *std.Io.Writer) !void {
+        const win_str = if (self.wins != 1) "wins" else "win";
+        const loss_str = if (self.losses != 1) "losses" else "loss";
+        const penalty_str = if (self.penalties != 1) "penalties" else "penalty";
+        try sink.print(
+            "{d} ({d} {s}, {d} {s}, {d} {s})",
+            .{
+                self.value(),
+                self.wins,
+                win_str,
+                self.losses,
+                loss_str,
+                self.penalties,
+                penalty_str,
+            },
+        );
+    }
+};

@@ -68,7 +68,7 @@ pub fn main() !void {
     var debug_view: View.Debug = undefined;
     const view: View.Interface = switch (mode) {
         .kitty => blk: {
-            kitty_view = View.Kitty.init(stdout);
+            kitty_view = View.Kitty.init(gpa, stdout);
             break :blk .{ .kitty = &kitty_view };
         },
         .debug => blk: {
@@ -76,14 +76,15 @@ pub fn main() !void {
             break :blk .{ .debug = &debug_view };
         },
     };
-    var tournament: Tournament = .{
-        .gpa = gpa,
-        .stdin = stdin,
-        .stdout = stdout,
-        .random = random,
-        .entries = entries,
-        .cwd = base_dir,
-    };
+    var tournament = try Tournament.init(
+        gpa,
+        stdin,
+        stdout,
+        random,
+        entries,
+        base_dir,
+    );
+    // Leak tournament
     try tournament.play(view);
 }
 
