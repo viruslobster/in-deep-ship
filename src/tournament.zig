@@ -214,17 +214,16 @@ pub const Player = struct {
     }
 
     pub fn pollMessage(self: *Player) !?Protocol.Message {
-        const child = self.child orelse return error.MustCallSpawnFirst;
+        const child = if (self.child) |*child| child else return error.MustCallSpawnFirst;
 
         if (self.stdout == null) {
             const stdout = child.stdout orelse unreachable;
             self.stdout = stdout.reader(&self.stdout_buffer);
         }
         const stdout = &(self.stdout orelse unreachable);
-        const message = Protocol.Message.parse(
-            &stdout.interface,
-            self.gpa,
-        ) catch |err| {
+        const message = Protocol.Message.parse(&stdout.interface, self.gpa) catch |err| {
+            // TODO: actually impl for UnknownMessage
+            if (err == error.UnknownMessage) return null;
             if (err != error.ReadFailed) return err;
 
             const actual_err = stdout.err orelse unreachable;
@@ -293,9 +292,12 @@ fn playGame(game: *Game, view: View.Interface, arena_alloc: *std.heap.ArenaAlloc
                     }
                 };
             },
-            else => std.log.info("{s}: Unexpected message: {f}", .{ player.entry.name, message }),
+            else => std.log.info("{s}: !Unexpected message: {f}", .{ player.entry.name, message }),
         }
-        if (game.allPlaced()) break;
+        if (game.allPlaced()) {
+            std.log.debug("All placed", .{});
+            break;
+        }
         std.log.debug("Waiting for ships to be placed", .{});
     }
 
@@ -364,6 +366,7 @@ fn playGameTurn(game: *Game, view: View.Interface, player_id: usize) !void {
 fn setNonBlocking(handle: std.fs.File.Handle) !void {
     var flags = try std.posix.fcntl(handle, std.posix.F.GETFL, 0);
     flags |= 1 << @bitOffsetOf(std.posix.O, "NONBLOCK");
+    // TODO: don't ignore
     _ = try std.posix.fcntl(handle, std.posix.F.SETFL, flags);
 }
 
