@@ -1,6 +1,0 @@
-.{
-    .name = "Stochastic Steve",
-    .runnable = "src/main.py",
-    .img = "assets/steve.png",
-    .emote = "assets/kaboom.mp3",
-}

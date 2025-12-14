@@ -223,7 +223,9 @@ pub const Kitty = struct {
 
         // Write entry names from highest to lowest score
         var ordered_indices = try sortByScore(self.gpa, scores);
-        ordered_indices = ordered_indices[0..limit];
+        if (ordered_indices.len > limit) {
+            ordered_indices = ordered_indices[0..limit];
+        }
         defer self.gpa.free(ordered_indices);
 
         for (ordered_indices, 1..) |i, place| {
@@ -366,6 +368,15 @@ pub const Kitty = struct {
 
         // Render all the text
         try self.g.stdout.print("{f}", .{layout});
+        var status_buffer: [256]u8 = undefined;
+        var status = std.io.Writer.fixed(&status_buffer);
+        try status.print(
+            "Game {} of {}. Match {} of {}",
+            .{ game.current_game, game.total_games, game.current_round, game.total_rounds },
+        );
+        const status_col: u16 = @intCast(winsize.col - status.buffered().len);
+        try self.g.setCursor(.{ .row = winsize.row, .col = status_col });
+        try self.g.stdout.writeAll(status.buffered());
 
         // Render all the images
         // Every image drawn gets a placement_id. Only the pair (image_id, placement_id)
