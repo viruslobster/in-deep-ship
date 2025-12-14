@@ -267,7 +267,8 @@ test "message-parse" {
     }
     {
         var source = std.Io.Reader.fixed("place-ships;3;horizontal;A0;4;vertical;J9\n");
-        const result = try Message.parse(&source, gpa);
+        const maybe_result = try Message.parse(&source, gpa);
+        const result = maybe_result orelse return error.NoResult;
         defer gpa.free(result.place_ships_response);
 
         try std.testing.expect(result == .place_ships_response);
