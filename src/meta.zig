@@ -51,6 +51,16 @@ pub const Entry = struct {
         };
     }
 
+    pub fn defaultForTest(name: []const u8) Entry {
+        return .{
+            .dirname = "/dir/name",
+            .name = name,
+            .runnable = "runnable",
+            .img = "foo.png",
+            .emote = "foo.mp3",
+        };
+    }
+
     pub fn deinit(self: *Entry, gpa: std.mem.Allocator) void {
         gpa.free(self.dirname);
         gpa.free(self.name);
@@ -129,8 +139,4 @@ test {
     const entries = try parse(gpa, entries_path);
     defer gpa.free(entries);
     defer for (entries) |*e| e.deinit(gpa);
-
-    for (entries) |entry| {
-        std.debug.print("Parsed entry '{s}'\n", .{entry.name});
-    }
 }

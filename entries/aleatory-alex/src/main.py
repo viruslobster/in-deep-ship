@@ -1,13 +1,14 @@
 #!/usr/bin/env python
-from copy import copy
 import random
 import string
-from time import sleep
-from dataclasses import dataclass
 import sys
+from copy import copy
+from dataclasses import dataclass
+from time import sleep
 
 # Turn this on to test penatlies for taking too long in between moves
 RANDOM_SLEEP = False
+
 
 @dataclass
 class Placement:
@@ -111,7 +112,7 @@ def wait_message(event: str) -> str:
 
 def log(message: str) -> None:
     print(message, file=sys.stderr)
-        
+
 
 def play_game() -> None:
     log("py: starting game")
@@ -119,12 +120,9 @@ def play_game() -> None:
     wait_message("place-ships")
     placements = random_placements()
     print(placements, flush=True)
+    log("py: sent placements")
 
-    moves = [
-        Move(x, y)
-        for x in range(11)
-        for y in range(9)
-    ]
+    moves = [Move(x, y) for x in range(11) for y in range(9)]
     random.shuffle(moves)
     while True:
         line = input()
@@ -132,7 +130,7 @@ def play_game() -> None:
             move = moves.pop()
             if RANDOM_SLEEP and random.random() > 0.5:
                 sleep(1.5)
-                
+
             print(move, flush=True)
         elif "turn-result" in line:
             turn_result = TurnResult.parse(line)
@@ -145,7 +143,6 @@ def play_game() -> None:
             return
         else:
             log(f"py: unrecognized: {line}")
-        
 
 
 if __name__ == "__main__":
@@ -153,4 +150,3 @@ if __name__ == "__main__":
     print("round-start", flush=True)
     while True:
         play_game()
-

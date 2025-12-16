@@ -10,6 +10,7 @@ const Tournament = @import("tournament.zig");
 pub const Mode = enum {
     debug,
     kitty,
+    unittest,
 };
 
 pub const Interface = union(Mode) {
@@ -18,6 +19,9 @@ pub const Interface = union(Mode) {
 
     /// A more involved implementation using the Kitty Graphics protocol
     kitty: *Kitty,
+
+    /// For use in tests. Mostly does nothing
+    unittest: *Unittest,
 
     pub fn deinit(self: Interface, gpa: std.mem.Allocator) !void {
         switch (self) {
@@ -135,6 +139,55 @@ pub const Debug = struct {
 
     pub fn clear(self: *Debug) !void {
         // Noop for debug
+        _ = self;
+    }
+};
+
+pub const Unittest = struct {
+    pub fn deinit(self: *Unittest, gpa: std.mem.Allocator) void {
+        _ = self;
+        _ = gpa;
+    }
+
+    fn alloc(self: *Unittest, entries: []const Meta.Entry) !void {
+        _ = self;
+        _ = entries;
+    }
+
+    pub fn leaderboard(
+        self: *Unittest,
+        entries: []const Meta.Entry,
+        scores: []const Tournament.Score,
+    ) !void {
+        _ = self;
+        _ = entries;
+        _ = scores;
+    }
+
+    fn startRound(self: *Unittest, game: *const Tournament.Game) !void {
+        _ = self;
+        _ = game;
+    }
+
+    fn finishGame(self: *Unittest, winner_id: usize, game: *const Tournament.Game) !void {
+        _ = self;
+        _ = winner_id;
+        _ = game;
+    }
+
+    fn turn(self: *Unittest, game: *const Tournament.Game) !void {
+        _ = self;
+        _ = game;
+    }
+
+    pub fn fire(self: *Unittest, player_id: usize, shot: Point, kind: Battleship.Shot) !void {
+        _ = self;
+        _ = player_id;
+        _ = shot;
+        _ = kind;
+    }
+
+    pub fn clear(self: *Unittest) !void {
         _ = self;
     }
 };
@@ -386,7 +439,7 @@ pub const Kitty = struct {
         inline for (0..2) |i| {
             const offset_x: u16 = @intCast(layout.offset(i * 2) + 1);
             const offset_y: u16 = 0;
-            const res = try R.portraitNoAlloc(game.players[i].entry.img);
+            const res = try R.portraitNoAlloc(game.entries[i].img);
             var opts = res.imageOptions();
             opts.placement_id = i + 1;
             try self.g.imagePos(offset_x, offset_y, opts);

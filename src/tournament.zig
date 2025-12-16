@@ -1,13 +1,16 @@
 const std = @import("std");
-const View = @import("view.zig");
 
+const View = @import("view.zig");
 const Battleship = @import("battleship.zig");
 const Meta = @import("meta.zig");
 const Protocol = @import("protocol.zig");
 const Graphics = @import("graphics.zig");
+const Time = @import("time.zig");
+const TestPlayer = @import("test_player.zig");
 
 const Self = @This();
 gpa: std.mem.Allocator,
+time: Time,
 stdin: *std.Io.Reader,
 stdout: *std.Io.Writer,
 random: std.Random,
@@ -17,16 +20,18 @@ cwd: []const u8,
 
 pub fn init(
     gpa: std.mem.Allocator,
+    time: Time,
     stdin: *std.Io.Reader,
     stdout: *std.Io.Writer,
     random: std.Random,
     entries: []const Meta.Entry,
-    cwd: []u8,
+    cwd: []const u8,
 ) !Self {
     const scores = try gpa.alloc(Score, entries.len);
     for (scores) |*s| s.* = .{};
     return .{
         .gpa = gpa,
+        .time = time,
         .stdin = stdin,
         .stdout = stdout,
         .random = random,
@@ -68,14 +73,52 @@ pub fn play(self: *Self, view: View.Interface) !void {
 
     var game_num: u32 = 1;
     while (true) {
-        std.debug.assert(player0_id != player1_id);
+        try view.leaderboard(self.entries, self.scores);
 
+        std.debug.assert(player0_id != player1_id);
         const key = pairKey(player0_id, player1_id);
         std.debug.assert(!played_pairs.contains(key));
         try played_pairs.put(key, {});
 
-        try view.leaderboard(self.entries, self.scores);
-        const winner = try self.playRound(view, player0_id, player1_id, game_num, pairs_len);
+        const entry0 = &self.entries[player0_id];
+        var process0 = try spawnEntry(self.gpa, entry0);
+        defer process0.kill(entry0);
+        var stdin_buffer0: [256]u8 = undefined;
+        var stdout_buffer0: [256]u8 = undefined;
+        var player0_process = PlayerBridge.init(
+            process0.stdin,
+            process0.stdout,
+            &stdin_buffer0,
+            &stdout_buffer0,
+        );
+
+        const entry1 = &self.entries[player1_id];
+        var process1 = try spawnEntry(self.gpa, entry1);
+        defer process1.kill(entry1);
+        var stdin_buffer1: [256]u8 = undefined;
+        var stdout_buffer1: [256]u8 = undefined;
+        var player1_process = PlayerBridge.init(
+            process1.stdin,
+            process1.stdout,
+            &stdin_buffer1,
+            &stdout_buffer1,
+        );
+
+        const total_games = 3;
+        var game = Game.init(
+            player0_id,
+            player1_id,
+            &player0_process,
+            &player1_process,
+            &self.entries[player0_id],
+            &self.entries[player1_id],
+            total_games,
+            game_num,
+            pairs_len,
+        );
+        defer game.deinit();
+
+        const winner = try self.playRound(view, &game);
         std.debug.assert(winner == player0_id or winner == player1_id);
 
         if (played_pairs.count() == pairs_len) break;
@@ -87,100 +130,61 @@ pub fn play(self: *Self, view: View.Interface) !void {
     try view.leaderboard(self.entries, self.scores);
 }
 
-fn nextPair(
-    winner_id: usize,
-    player0_id: usize,
-    player1_id: usize,
-    played_pairs: std.AutoHashMap([2]usize, void),
-    players_len: usize,
-) [2]usize {
-    // Find an unplayed match with the last winner
-    var result = [2]usize{ player0_id, player1_id };
-    var idx: usize = if (winner_id == player0_id) 1 else 0;
-    for (0..players_len) |_| {
-        result[idx] = (result[idx] + 1) % players_len;
-        if (result[0] == result[1]) continue;
-        const k = pairKey(result[0], result[1]);
-        if (!played_pairs.contains(k)) return result;
-    }
-    // Winner has already player every match, just take the next available match
-    idx = (idx + 1) % 2;
-    for (0..players_len) |_| {
-        result[idx] = (result[idx] + 1) % players_len;
-        if (result[0] == result[1]) continue;
-        const k = pairKey(result[0], result[1]);
-        if (!played_pairs.contains(k)) return result;
-    }
-    // Should be unreachable if there is an unplayed match
-    std.debug.assert(false);
-    return result;
-}
-
-fn pairKey(player0_id: usize, player1_id: usize) [2]usize {
-    var key = [2]usize{ player0_id, player1_id };
-    std.mem.sort(usize, &key, {}, std.sort.asc(usize));
-    return key;
-}
-
 // Returns either player_id0 or player_id1, depending on which player won
 fn playRound(
     self: *Self,
     view: View.Interface,
-    player0_id: usize,
-    player1_id: usize,
-    current_round: u32,
-    total_rounds: u32,
+    game: *Game,
 ) !usize {
     var arena_allocator = std.heap.ArenaAllocator.init(self.gpa);
     defer arena_allocator.deinit();
 
-    const total_games = 3;
-    var game = Game.init(
-        arena_allocator.allocator(),
-        &self.entries[player0_id],
-        &self.entries[player1_id],
-        total_games,
-        current_round,
-        total_rounds,
-    );
-    defer game.deinit();
     try game.startRound();
-    try view.startRound(&game);
-    for (0..total_games) |_| {
+    try view.startRound(game);
+    for (0..game.total_games) |_| {
         try view.clear();
         // winner and loser ids are 0 or 1 (relative to `game`). They are NOT player0_id or player1_id.
-        const winner_id = try playGame(&game, view, &arena_allocator);
+        const winner_id = try self.playGame(game, view, &arena_allocator);
         const loser_id = (winner_id + 1) % 2;
         game.scores[winner_id].wins += 1;
         game.scores[loser_id].losses += 1;
-        try view.turn(&game);
-        try view.finishGame(winner_id, &game);
+        try view.turn(game);
+        try view.finishGame(winner_id, game);
 
         game.current_game += 1;
         _ = arena_allocator.reset(.retain_capacity);
     }
-    self.scores[player0_id].add(game.scores[0]);
-    self.scores[player1_id].add(game.scores[1]);
+    self.scores[game.player0_id].add(game.scores[0]);
+    self.scores[game.player1_id].add(game.scores[1]);
     // TODO: can there be a tie here? what are the ramifications?
-    return if (game.scores[0].value() >= game.scores[1].value()) player0_id else player1_id;
+    return if (game.scores[0].value() >= game.scores[1].value()) game.player0_id else game.player1_id;
 }
 
 /// Returns the id of the winning player
-fn playGame(game: *Game, view: View.Interface, arena_alloc: *std.heap.ArenaAllocator) !usize {
+pub fn playGame(
+    self: *Self,
+    game: *Game,
+    view: View.Interface,
+    arena_alloc: *std.heap.ArenaAllocator,
+) !usize {
+    const gpa = arena_alloc.allocator();
     std.log.debug("Starting game", .{});
     try game.resetState();
 
-    for (&game.players) |*player| {
+    for (&game.players) |player| {
         try player.writeMessage(.{ .game_start = {} });
         try player.writeMessage(.{ .place_ships_request = {} });
     }
 
     std.log.debug("Placing ships...", .{});
     var player_id: usize = 0;
-    while (true) {
+    for (0..1e6) |_| {
+        // TODO: bug where one player places for both
         player_id = (player_id + 1) % 2;
-        const player = &game.players[player_id];
-        const maybe_message = try player.pollMessage();
+        const entry = game.entries[player_id];
+        const player = game.players[player_id];
+        const maybe_message = try player.pollMessage(gpa);
+        std.log.debug("message: {any}", .{maybe_message});
         const message = maybe_message orelse continue;
         switch (message) {
             .place_ships_response => |placements| {
@@ -192,19 +196,18 @@ fn playGame(game: *Game, view: View.Interface, arena_alloc: *std.heap.ArenaAlloc
                     }
                 };
             },
-            else => std.log.info("{s}: !Unexpected message: {f}", .{ player.entry.name, message }),
+            else => std.log.info("{s}: !Unexpected message: {f}", .{ entry.name, message }),
         }
-        if (game.allPlaced()) {
-            std.log.debug("All placed", .{});
-            break;
-        }
+        if (game.allPlaced()) break;
         std.log.debug("Waiting for ships to be placed", .{});
+    } else {
+        return error.InfiniteLoop;
     }
 
     std.log.debug("Ships placed", .{});
     // Take turns
     // TODO: randomize player_id
-    while (true) {
+    for (0..1e6) |_| {
         try view.turn(game);
 
         if (game.boards[0].allSunk()) {
@@ -217,50 +220,76 @@ fn playGame(game: *Game, view: View.Interface, arena_alloc: *std.heap.ArenaAlloc
             return 0;
         }
 
-        try playGameTurn(game, view, player_id);
+        try self.playGameTurn(arena_alloc.allocator(), game, view, player_id);
 
         player_id = (player_id + 1) % 2;
         _ = arena_alloc.reset(.retain_capacity);
-        std.Thread.sleep(50 * std.time.ns_per_ms);
+        self.time.sleep(50 * std.time.ns_per_ms);
+    } else {
+        return error.InfiniteLoop;
     }
 }
 
-fn playGameTurn(game: *Game, view: View.Interface, player_id: usize) !void {
-    const player = &game.players[player_id];
+pub fn playGameTurn(
+    self: *Self,
+    gpa: std.mem.Allocator,
+    game: *Game,
+    view: View.Interface,
+    player_id: usize,
+) !void {
+    const entry = game.entries[player_id];
+    const player = game.players[player_id];
     try player.writeMessage(.{ .turn_request = {} });
-    const t0 = std.time.milliTimestamp();
+    const t0 = self.time.nowMs();
+    var penalties: i32 = 0;
+    defer game.scores[player_id].penalties += penalties;
 
-    while (true) {
-        const maybe_message = try player.pollMessage();
+    for (0..1e9) |_| {
+        const elapsed = self.time.nowMs() - t0;
+        if (elapsed > 1010 and penalties == 0) {
+            std.log.info("{s} took too long to respond!", .{entry.name});
+            penalties += 1;
+        }
+        if (elapsed > 2010 and penalties == 1) {
+            std.log.info("{s} took too long to respond!", .{entry.name});
+            penalties += 1;
+        }
+        if (elapsed > 3010) {
+            std.log.info("{s} took too long to respond, skipping thier turn!", .{entry.name});
+            penalties += 1;
+            return;
+        }
+        const maybe_message = try player.pollMessage(gpa);
         const message = maybe_message orelse {
-            std.Thread.sleep(10 * std.time.ns_per_ms);
+            self.time.sleep(10 * std.time.ns_per_ms);
             continue;
         };
-        const elapsed = std.time.milliTimestamp() - t0;
-        if (elapsed > 1010) {
-            std.log.info("{s} took too long to respond!", .{player.entry.name});
-            game.scores[player_id].penalties += 1;
-        }
 
         switch (message) {
             .turn_response => |turn| {
                 const shot = try game.takeTurn(player_id, turn.x, turn.y);
                 try view.fire(
                     player_id,
-                    .{
-                        .x = @intCast(turn.x),
-                        .y = @intCast(turn.y),
-                    },
+                    .{ .x = @intCast(turn.x), .y = @intCast(turn.y) },
                     shot,
                 );
             },
             else => {
-                std.log.info("{s}: Unexpected message: {f}", .{ player.entry.name, message });
+                std.log.info("{s}: Unexpected message: {f}", .{ entry.name, message });
                 continue;
             },
         }
         break;
+    } else {
+        return error.InfiniteLoop;
     }
+}
+
+fn mockProcess(stdin: *std.Io.Reader, stdout: *std.Io.Writer) !void {
+    _ = stdin;
+    const msg = Protocol.Message{ .turn_response = .{ .x = 1, .y = 1 } };
+    try stdout.print("{f}\n", .{msg});
+    try stdout.flush();
 }
 
 fn sortShips(ships: []Battleship.Ship) void {
@@ -291,7 +320,7 @@ const game_ships: [5]Battleship.Ship = .{
     .{ .size = 5 },
 };
 
-test "game-ships-sorted" {
+test "game ships sorted" {
     var copy = game_ships;
     sortShips(&copy);
     for (0..game_ships.len) |i| {
@@ -299,88 +328,147 @@ test "game-ships-sorted" {
     }
 }
 
-pub const PlayerProcess = struct {
-    entry: *const Meta.Entry,
-    stdin_buffer: [256]u8 = undefined,
-    stdout_buffer: [256]u8 = undefined,
-    child: ?std.process.Child = null,
-    stdout: ?std.fs.File.Reader = null,
-    stdin: ?std.fs.File.Writer = null,
-    gpa: std.mem.Allocator,
+const ChildWithIo = struct {
+    child: std.process.Child,
+    stdout: std.fs.File,
+    stdin: std.fs.File,
 
-    pub fn init(entry: *const Meta.Entry, gpa: std.mem.Allocator) PlayerProcess {
-        return .{
-            .entry = entry,
-            .gpa = gpa,
+    fn kill(self: *ChildWithIo, entry: *const Meta.Entry) void {
+        _ = self.child.kill() catch |err| {
+            std.log.err("Failed to kill {s}: {}", .{ entry.name, err });
         };
     }
+};
 
-    pub fn deinit(self: *PlayerProcess) void {
-        if (self.child) |*child| {
-            _ = child.kill() catch |err| {
-                std.log.err("Failed to kill {s}: {}", .{ self.entry.name, err });
+pub fn spawnEntry(gpa: std.mem.Allocator, entry: *const Meta.Entry) !ChildWithIo {
+    // If we don't make sure the file exists like this the child process will
+    // might silently
+    const file = std.fs.openFileAbsolute(entry.runnable, .{}) catch |err| {
+        std.log.err("could not open '{s}'", .{entry.runnable});
+        return err;
+    };
+    file.close();
+
+    var child = std.process.Child.init(&.{entry.runnable}, gpa);
+    child.stdin_behavior = .Pipe;
+    child.stdout_behavior = .Pipe;
+    child.stderr_behavior = .Inherit;
+
+    try child.spawn();
+    const stdout = child.stdout orelse return error.NoOutput;
+    const stdin = child.stdin orelse return error.NoInput;
+
+    try setNonBlocking(stdout.handle);
+    try setNonBlocking(stdin.handle);
+    return .{ .child = child, .stdout = stdout, .stdin = stdin };
+}
+
+const ThreadWithIo = struct {
+    thread: std.Thread,
+    stdin: std.fs.File,
+    stdout: std.fs.File,
+};
+
+pub fn spawnFn(function: TestPlayer.Fn) !ThreadWithIo {
+    const stdout = try std.posix.pipe();
+    const stdin = try std.posix.pipe();
+
+    try setNonBlocking(stdin[0]);
+    try setNonBlocking(stdin[1]);
+    try setNonBlocking(stdout[0]);
+    try setNonBlocking(stdout[1]);
+
+    const Context = struct {
+        function: TestPlayer.Fn,
+        stdout: std.fs.File,
+        stdin: std.fs.File,
+
+        fn init(func: TestPlayer.Fn, stdin_fd: std.posix.fd_t, stdout_fd: std.posix.fd_t) @This() {
+            return .{
+                .function = func,
+                .stdin = std.fs.File{ .handle = stdin_fd },
+                .stdout = std.fs.File{ .handle = stdout_fd },
             };
         }
-    }
 
-    pub fn spawn(self: *PlayerProcess) !void {
-        // If we don't make sure the file exists like this the child process will
-        // might silently
-        const file = std.fs.openFileAbsolute(self.entry.runnable, .{}) catch |err| {
-            std.log.err("could not open '{s}'", .{self.entry.runnable});
-            return err;
+        fn go(ctx: @This()) !void {
+            defer ctx.stdin.close();
+            defer ctx.stdout.close();
+
+            var stdin_buffer: [256]u8 = undefined;
+            var stdin_reader = ctx.stdin.reader(&stdin_buffer);
+            var stdout_buffer: [256]u8 = undefined;
+            var stdout_writer = ctx.stdout.writer(&stdout_buffer);
+            try ctx.function(&stdin_reader.interface, &stdout_writer.interface);
+        }
+    };
+    const ctx = Context.init(function, stdin[0], stdout[1]);
+    const thread = try std.Thread.spawn(.{}, Context.go, .{ctx});
+    return .{
+        .thread = thread,
+        .stdin = std.fs.File{ .handle = stdin[1] },
+        .stdout = std.fs.File{ .handle = stdout[0] },
+    };
+}
+
+fn setNonBlocking(handle: std.fs.File.Handle) !void {
+    var flags = try std.posix.fcntl(handle, std.posix.F.GETFL, 0);
+    flags |= 1 << @bitOffsetOf(std.posix.O, "NONBLOCK");
+    // TODO: don't ignore
+    _ = try std.posix.fcntl(handle, std.posix.F.SETFL, flags);
+}
+
+pub const PlayerBridge = struct {
+    // Need to hold on to the File.Writer so I can inspect writer.err
+    // to differentiate a real ReadFailed and a WouldBlock
+    stdin: std.fs.File.Writer,
+    stdout: std.fs.File.Reader,
+
+    pub fn init(
+        stdin: std.fs.File,
+        stdout: std.fs.File,
+        stdin_buf: []u8,
+        stdout_buf: []u8,
+    ) PlayerBridge {
+        return .{
+            .stdin = stdin.writer(stdin_buf),
+            .stdout = stdout.reader(stdout_buf),
         };
-        file.close();
-
-        var child = std.process.Child.init(&.{self.entry.runnable}, self.gpa);
-        child.stdin_behavior = .Pipe;
-        child.stdout_behavior = .Pipe;
-        child.stderr_behavior = .Inherit;
-
-        try child.spawn();
-        const stdout = child.stdout orelse return error.NoOutput;
-        const stdin = child.stdin orelse return error.NoInput;
-
-        try setNonBlocking(stdout.handle);
-        try setNonBlocking(stdin.handle);
-        self.child = child;
-        self.stdout = stdout.reader(&self.stdout_buffer);
-        self.stdin = stdin.writer(&self.stdin_buffer);
     }
 
-    fn setNonBlocking(handle: std.fs.File.Handle) !void {
-        var flags = try std.posix.fcntl(handle, std.posix.F.GETFL, 0);
-        flags |= 1 << @bitOffsetOf(std.posix.O, "NONBLOCK");
-        // TODO: don't ignore
-        _ = try std.posix.fcntl(handle, std.posix.F.SETFL, flags);
+    pub fn writeMessage(self: *PlayerBridge, message: Protocol.Message) !void {
+        self.writeMessageImpl(message) catch |err| {
+            if (err != error.WriteFailed) return err;
+            const actual_err = self.stdin.err orelse return error.UnknownRead;
+            switch (actual_err) {
+                error.WouldBlock => return error.Undelivered,
+                error.BrokenPipe => {
+                    // Don't return an error here because this could be intentionally.
+                    // Player could have written the rest of their output and exited.
+                    // If there is a problem we will know when trying to read a response
+                    // that won't ever come.
+                    std.log.warn("Message {f} not delivered b/c process likely died", .{message});
+                    return;
+                },
+                else => return actual_err,
+            }
+        };
     }
 
-    pub fn writeMessage(self: *PlayerProcess, message: Protocol.Message) !void {
-        const child = self.child orelse return error.MustCallSpawnFirst;
-
-        if (self.stdin == null) {
-            const stdin = child.stdin orelse unreachable;
-            self.stdin = stdin.writer(&self.stdin_buffer);
-        }
-        const stdin = &(self.stdin orelse unreachable);
-        try stdin.interface.print("{f}\n", .{message});
-        try stdin.interface.flush();
+    fn writeMessageImpl(self: *PlayerBridge, message: Protocol.Message) !void {
+        const stdin = &self.stdin.interface;
+        try stdin.print("{f}\n", .{message});
+        try stdin.flush();
     }
 
-    pub fn pollMessage(self: *PlayerProcess) !?Protocol.Message {
-        const child = if (self.child) |*child| child else return error.MustCallSpawnFirst;
-
-        if (self.stdout == null) {
-            const stdout = child.stdout orelse unreachable;
-            self.stdout = stdout.reader(&self.stdout_buffer);
-        }
-        const stdout = &(self.stdout orelse unreachable);
-        const message = Protocol.Message.parse(&stdout.interface, self.gpa) catch |err| {
+    pub fn pollMessage(self: *PlayerBridge, gpa: std.mem.Allocator) !?Protocol.Message {
+        const stdout = &self.stdout.interface;
+        const message = Protocol.Message.parse(stdout, gpa) catch |err| {
             // TODO: actually impl for UnknownMessage
             if (err == error.UnknownMessage) return null;
             if (err != error.ReadFailed) return err;
 
-            const actual_err = stdout.err orelse unreachable;
+            const actual_err = self.stdout.err orelse return error.UnknownWrite;
             switch (actual_err) {
                 error.WouldBlock => return null,
                 else => return err,
@@ -390,23 +478,28 @@ pub const PlayerProcess = struct {
     }
 };
 
-const game_width = 11;
-const game_height = 9;
-const BattleshipBoard = Battleship.Board(game_width, game_height, &game_ships);
+pub const game_width = 11;
+pub const game_height = 9;
+pub const BattleshipBoard = Battleship.Board(game_width, game_height, &game_ships);
 pub const Game = struct {
     entries: [2]*const Meta.Entry,
-    players: [2]PlayerProcess,
+    players: [2]*PlayerBridge,
     boards: [2]BattleshipBoard = undefined,
     scores: [2]Score = [2]Score{ .{}, .{} },
     placed: u8 = 0,
 
+    player0_id: usize,
+    player1_id: usize,
     current_game: u32 = 1,
     total_games: u32,
     current_round: u32,
     total_rounds: u32,
 
-    fn init(
-        gpa: std.mem.Allocator,
+    pub fn init(
+        player0_id: usize,
+        player1_id: usize,
+        process0: *PlayerBridge,
+        process1: *PlayerBridge,
         entry0: *const Meta.Entry,
         entry1: *const Meta.Entry,
         total_games: u32,
@@ -415,10 +508,9 @@ pub const Game = struct {
     ) Game {
         return .{
             .entries = [2]*const Meta.Entry{ entry0, entry1 },
-            .players = [2]PlayerProcess{
-                PlayerProcess.init(entry0, gpa),
-                PlayerProcess.init(entry1, gpa),
-            },
+            .players = [2]*PlayerBridge{ process0, process1 },
+            .player0_id = player0_id,
+            .player1_id = player1_id,
             .total_games = total_games,
             .current_round = current_round,
             .total_rounds = total_rounds,
@@ -426,24 +518,21 @@ pub const Game = struct {
     }
 
     pub fn deinit(self: *Game) void {
-        for (&self.players) |*p| p.deinit();
+        _ = self;
     }
 
     pub fn allPlaced(self: *Game) bool {
         return self.placed >= 2;
     }
 
-    fn playerIndex(self: *Game, player: *PlayerProcess) usize {
+    fn playerIndex(self: *Game, player: *PlayerBridge) usize {
         if (&self.players[0] == player) return 0;
         return 1;
     }
 
     fn startRound(self: *Game) !void {
-        for (&self.players) |*player| {
-            std.log.debug("Player entry: {f}", .{player.entry});
-            try player.spawn();
+        for (&self.players) |player| {
             try player.writeMessage(.{ .round_start = {} });
-            std.log.debug("spawned player '{s}'", .{player.entry.name});
         }
     }
 
@@ -451,31 +540,25 @@ pub const Game = struct {
         self.placed = 0;
     }
 
-    fn placeShips(
+    pub fn placeShips(
         self: *Game,
         player_id: usize,
         placements: []Battleship.Placement,
     ) !void {
-        const player = &self.players[player_id];
         const board = &self.boards[player_id];
         sortPlacements(placements);
-        board.* = BattleshipBoard.init(placements) catch |err| {
-            std.log.err(
-                "{s}: placements '{any}' are invalid: {}",
-                .{ player.entry.name, placements, err },
-            );
+        board.* = BattleshipBoard.init(placements) catch {
             return error.InvalidPlacement;
         };
-        std.log.info("{s}: placed ships", .{player.entry.name});
         self.placed += 1;
         return;
     }
 
     fn takeTurn(self: *Game, player_id: usize, x: usize, y: usize) !Battleship.Shot {
-        const player = &self.players[player_id];
+        const player = self.players[player_id];
         const other = (player_id + 1) % 2;
         const other_board = &self.boards[other];
-        const other_player = &self.players[other];
+        const other_player = self.players[other];
         const shot = other_board.fire(x, y);
         try player.writeMessage(.{ .turn_result = .{
             .x = x,
@@ -534,3 +617,108 @@ pub const Score = struct {
         self.penalties += other.penalties;
     }
 };
+
+fn nextPair(
+    winner_id: usize,
+    player0_id: usize,
+    player1_id: usize,
+    played_pairs: std.AutoHashMap([2]usize, void),
+    players_len: usize,
+) [2]usize {
+    // Find an unplayed match with the last winner
+    var result = [2]usize{ player0_id, player1_id };
+    var idx: usize = if (winner_id == player0_id) 1 else 0;
+    for (0..players_len) |_| {
+        result[idx] = (result[idx] + 1) % players_len;
+        if (result[0] == result[1]) continue;
+        const k = pairKey(result[0], result[1]);
+        if (!played_pairs.contains(k)) return result;
+    }
+    // Winner has already player every match, just take the next available match
+    idx = (idx + 1) % 2;
+    for (0..players_len) |_| {
+        result[idx] = (result[idx] + 1) % players_len;
+        if (result[0] == result[1]) continue;
+        const k = pairKey(result[0], result[1]);
+        if (!played_pairs.contains(k)) return result;
+    }
+    // Should be unreachable if there is an unplayed match
+    std.debug.assert(false);
+    return result;
+}
+
+fn pairKey(player0_id: usize, player1_id: usize) [2]usize {
+    var key = [2]usize{ player0_id, player1_id };
+    std.mem.sort(usize, &key, {}, std.sort.asc(usize));
+    return key;
+}
+
+const TestEnv = struct {
+    const entry0 = Meta.Entry.defaultForTest("entry0");
+    const entry1 = Meta.Entry.defaultForTest("entry1");
+    const entries = [_]Meta.Entry{ entry0, entry1 };
+    rng: std.Random.DefaultPrng,
+    time: Time.Fake = .{},
+    input: std.Io.Reader,
+    output: std.Io.Writer.Discarding,
+
+    fn init() TestEnv {
+        return .{
+            .rng = std.Random.DefaultPrng.init(std.testing.random_seed),
+            .input = std.Io.Reader.fixed(&.{}),
+            .output = std.Io.Writer.Discarding.init(&.{}),
+        };
+    }
+
+    fn testGame(
+        self: *TestEnv,
+        player0: TestPlayer.Fn,
+        player1: TestPlayer.Fn,
+    ) !Game {
+        var tourney = try Self.init(
+            std.testing.allocator,
+            self.time.interface(),
+            &self.input,
+            &self.output.writer,
+            self.rng.random(),
+            &entries,
+            "/base/dir",
+        );
+        defer tourney.deinit();
+
+        var stdin_buf0: [256]u8 = undefined;
+        var stdout_buf0: [256]u8 = undefined;
+        const process0 = try spawnFn(player0);
+        process0.thread.detach();
+        var bridge0 = PlayerBridge.init(process0.stdin, process0.stdout, &stdin_buf0, &stdout_buf0);
+
+        var stdin_buf1: [256]u8 = undefined;
+        var stdout_buf1: [256]u8 = undefined;
+        const process1 = try spawnFn(player1);
+        process1.thread.detach();
+        var bridge1 = PlayerBridge.init(process1.stdin, process1.stdout, &stdin_buf1, &stdout_buf1);
+
+        var test_view: View.Unittest = .{};
+        const view: View.Interface = .{ .unittest = &test_view };
+
+        var game = Game.init(0, 1, &bridge0, &bridge1, &entry0, &entry1, 1, 1, 1);
+        defer game.deinit();
+
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+
+        _ = try tourney.playGame(&game, view, &arena);
+        return game;
+    }
+};
+
+test "both players behaved" {
+    std.testing.log_level = .err;
+    var env = TestEnv.init();
+    var game = try env.testGame(TestPlayer.behaved, TestPlayer.behaved);
+    defer game.deinit();
+
+    const sunk0 = game.boards[0].allSunk();
+    const sunk1 = game.boards[1].allSunk();
+    try std.testing.expect(sunk0 ^ sunk1);
+}

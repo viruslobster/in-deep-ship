@@ -3,6 +3,7 @@ const std = @import("std");
 const Meta = @import("meta.zig");
 const View = @import("view.zig");
 const Tournament = @import("tournament.zig");
+const Time = @import("time.zig");
 
 fn help(stderr: *std.Io.Writer) !void {
     try stderr.print("Usage: in-deep-ship [play | debug]\n", .{});
@@ -75,9 +76,15 @@ pub fn main() !void {
             debug_view = View.Debug.init(stdout);
             break :blk .{ .debug = &debug_view };
         },
+        else => {
+            try stderr.print("unsupported mode\n", .{});
+            std.process.exit(1);
+        },
     };
+    var time: Time.Real = .{};
     var tournament = try Tournament.init(
         gpa,
+        time.interface(),
         stdin,
         stdout,
         random,
