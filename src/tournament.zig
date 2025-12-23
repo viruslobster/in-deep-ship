@@ -223,6 +223,12 @@ fn placeShips(self: *Self, gpa: std.mem.Allocator, game: *Game) !void {
     // Apply any penalties for late answers
     defer for (0..2) |i| {
         const attempt = &attempts[i];
+        if (attempt.retries > 0) {
+            std.log.info(
+                "{s} awarded {d} penalties in placeShips",
+                .{ self.entries[i].name, attempt.retries },
+            );
+        }
         game.scores[i].penalties += attempt.retries;
     };
     var placed = [2]bool{ false, false };
@@ -290,45 +296,40 @@ pub fn playGameTurn(
     const entry = game.entries[player_id];
     const player = game.players[player_id];
     try player.writeMessage(.{ .turn_request = {} });
-    const t0 = self.time.nowMs();
-    var penalties: i32 = 0;
-    defer game.scores[player_id].penalties += penalties;
+    var attempt = RequestAttempt{
+        .start_ms = self.time.nowMs(),
+        .timeout_ms = 1000,
+        .max_tries = 3,
+    };
+    defer {
+        if (attempt.retries > 0) {
+            std.log.info(
+                "{s} awarded {d} penalties in playGameTurn",
+                .{ self.entries[player_id].name, attempt.retries },
+            );
+        }
+        game.scores[player_id].penalties += attempt.retries;
+    }
 
     for (0..1e9) |_| {
-        const elapsed = self.time.nowMs() - t0;
-        if (elapsed > 1010 and penalties == 0) {
-            std.log.info("{s} took too long to respond!", .{entry.name});
-            penalties += 1;
-        }
-        if (elapsed > 2010 and penalties == 1) {
-            std.log.info("{s} took too long to respond!", .{entry.name});
-            penalties += 1;
-        }
-        if (elapsed > 3010) {
-            std.log.info("{s} took too long to respond, skipping thier turn!", .{entry.name});
-            penalties += 1;
+        const now = self.time.nowMs();
+        if (attempt.timedout(now)) {
+            std.log.info("{s} took too long to respond, skipping their turn", .{entry.name});
             return;
         }
-        const maybe_message = try player.pollMessage(gpa);
-        const message = maybe_message orelse {
-            self.time.sleep(10 * std.time.ns_per_ms);
+        defer self.time.sleep(10 * std.time.ns_per_ms);
+        const message = try player.pollMessage(gpa) orelse continue;
+        if (message != .turn_response) {
+            std.log.info("{s}: Unexpected message: {f}", .{ entry.name, message });
             continue;
-        };
-
-        switch (message) {
-            .turn_response => |turn| {
-                const shot = try game.takeTurn(player_id, turn.x, turn.y);
-                try view.fire(
-                    player_id,
-                    .{ .x = @intCast(turn.x), .y = @intCast(turn.y) },
-                    shot,
-                );
-            },
-            else => {
-                std.log.info("{s}: Unexpected message: {f}", .{ entry.name, message });
-                continue;
-            },
         }
+        const turn = message.turn_response;
+        const shot = try game.takeTurn(player_id, turn.x, turn.y);
+        try view.fire(
+            player_id,
+            .{ .x = @intCast(turn.x), .y = @intCast(turn.y) },
+            shot,
+        );
         break;
     } else {
         return error.InfiniteLoop;
@@ -789,4 +790,25 @@ test "one player unresponsive" {
 
     try expectEqual(0, game.scores[0].penalties);
     try expectEqual(3, game.scores[1].penalties);
+}
+
+test "one player laggy" {
+    std.testing.log_level = .err;
+    var env = TestEnv.init();
+    const gpa = std.testing.allocator;
+
+    var behaved_events = try TestPlayer.behaved(gpa);
+    defer behaved_events.deinit(gpa);
+
+    var laggy_events = try TestPlayer.laggy(gpa);
+    defer laggy_events.deinit(gpa);
+
+    var game = try env.testGame(behaved_events.items, laggy_events.items);
+    defer game.deinit();
+
+    const sunk0 = game.boards[0].allSunk();
+    const sunk1 = game.boards[1].allSunk();
+    try expect(sunk0 ^ sunk1);
+    try expectEqual(0, game.scores[0].penalties);
+    try expectEqual(51, game.scores[1].penalties);
 }

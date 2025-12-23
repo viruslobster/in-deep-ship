@@ -27,16 +27,15 @@ pub const Event = union(enum) {
 
 /// Turns a slice of messages into a stream bytes to parse. For use in tests.
 pub const EventReader = struct {
-    reader_time: i64,
-    sim_time: Time,
+    time: Time,
+    sleep_until: i64 = -1,
     msg_idx: usize = 0,
     events: []const Event,
     interface: std.Io.Reader,
 
     pub fn init(time: Time, events: []const Event, buffer: []u8) EventReader {
         return .{
-            .reader_time = 0,
-            .sim_time = time,
+            .time = time,
             .events = events,
             .interface = .{
                 .vtable = &.{ .stream = stream },
@@ -52,16 +51,18 @@ pub const EventReader = struct {
 
         for (0..1e6) |_| {
             if (self.events.len == 0) return Reader.StreamError.EndOfStream;
+            if (self.time.nowMs() < self.sleep_until) {
+                // Simulate a WouldBlock err
+                return Reader.StreamError.ReadFailed;
+            }
             switch (self.events[0]) {
                 .message => |msg| {
-                    if (self.sim_time.nowMs() < self.reader_time) {
-                        // Simulate a WouldBlock err
-                        return Reader.StreamError.ReadFailed;
-                    }
+                    std.log.info("emit msg", .{});
                     return self.writeMessage(msg, writer, limit);
                 },
                 .sleep_ms => |ms| {
-                    self.reader_time += ms;
+                    std.log.info("emit sleep", .{});
+                    self.sleep_until = self.time.nowMs() + ms;
                     self.events = self.events[1..];
                 },
             }
@@ -94,6 +95,7 @@ pub const EventReader = struct {
     }
 };
 
+/// Simulates a player that immediatly responds to everything
 pub fn behaved(gpa: std.mem.Allocator) !std.ArrayList(Event) {
     var result = try std.ArrayList(Event).initCapacity(gpa, 100);
     const place_ships = Protocol.Message{ .place_ships_response = &placements };
@@ -104,6 +106,19 @@ pub fn behaved(gpa: std.mem.Allocator) !std.ArrayList(Event) {
             const shot = Protocol.Message{ .turn_response = .{ .x = x, .y = y } };
             try result.append(gpa, .{ .message = shot });
         }
+    }
+    return result;
+}
+
+/// Simulates a player the same as `behaved` but with over a second of lag before every response.
+pub fn laggy(gpa: std.mem.Allocator) !std.ArrayList(Event) {
+    var behaved_events = try behaved(gpa);
+    defer behaved_events.deinit(gpa);
+
+    var result = try std.ArrayList(Event).initCapacity(gpa, behaved_events.items.len * 2);
+    for (behaved_events.items) |event| {
+        result.appendAssumeCapacity(.{ .sleep_ms = 1000 });
+        result.appendAssumeCapacity(event);
     }
     return result;
 }
