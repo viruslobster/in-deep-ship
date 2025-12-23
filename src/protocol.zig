@@ -29,9 +29,7 @@ pub const Message = union(enum) {
     lose: void,
 
     pub fn parse(source: *std.Io.Reader, gpa: std.mem.Allocator) !?Message {
-        const buffer = try source.takeDelimiter('\n') orelse {
-            return null;
-        };
+        const buffer = try source.takeDelimiter('\n') orelse return null;
 
         errdefer std.log.err("failed to parse '{s}'", .{buffer});
         var parts = std.mem.splitScalar(u8, buffer, ';');

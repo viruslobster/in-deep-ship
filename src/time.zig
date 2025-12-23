@@ -27,7 +27,7 @@ pub const Real = struct {
     pub fn sleep(ctx: *anyopaque, delta: u64) void {
         const self: *Real = @ptrCast(@alignCast(ctx));
         _ = self;
-        return std.Thread.sleep(delta);
+        std.Thread.sleep(delta);
     }
 
     pub fn interface(self: *Real) Self {
@@ -46,7 +46,7 @@ pub const Fake = struct {
 
     pub fn nowMs(ctx: *anyopaque) i64 {
         const self: *Fake = @ptrCast(@alignCast(ctx));
-        return @intCast(self.t);
+        return @as(i64, @intCast(@divFloor(self.t, std.time.ns_per_ms)));
     }
 
     pub fn sleep(ctx: *anyopaque, delta: u64) void {

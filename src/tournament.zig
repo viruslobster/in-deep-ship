@@ -7,6 +7,7 @@ const Protocol = @import("protocol.zig");
 const Graphics = @import("graphics.zig");
 const Time = @import("time.zig");
 const TestPlayer = @import("test_player.zig");
+const Bridge = @import("bridge.zig");
 
 const Self = @This();
 gpa: std.mem.Allocator,
@@ -85,7 +86,7 @@ pub fn play(self: *Self, view: View.Interface) !void {
         defer process0.kill(entry0);
         var stdin_buffer0: [256]u8 = undefined;
         var stdout_buffer0: [256]u8 = undefined;
-        var player0_process = PlayerBridge.init(
+        var player0_process = Bridge.File.init(
             process0.stdin,
             process0.stdout,
             &stdin_buffer0,
@@ -97,7 +98,7 @@ pub fn play(self: *Self, view: View.Interface) !void {
         defer process1.kill(entry1);
         var stdin_buffer1: [256]u8 = undefined;
         var stdout_buffer1: [256]u8 = undefined;
-        var player1_process = PlayerBridge.init(
+        var player1_process = Bridge.File.init(
             process1.stdin,
             process1.stdout,
             &stdin_buffer1,
@@ -108,8 +109,8 @@ pub fn play(self: *Self, view: View.Interface) !void {
         var game = Game.init(
             player0_id,
             player1_id,
-            &player0_process,
-            &player1_process,
+            .{ .file = &player0_process },
+            .{ .file = &player1_process },
             &self.entries[player0_id],
             &self.entries[player1_id],
             total_games,
@@ -143,12 +144,12 @@ fn playRound(
     try view.startRound(game);
     for (0..game.total_games) |_| {
         try view.clear();
-        // winner and loser ids are 0 or 1 (relative to `game`). They are NOT player0_id or player1_id.
-        const winner_id = try self.playGame(game, view, &arena_allocator);
-        const loser_id = (winner_id + 1) % 2;
-        game.scores[winner_id].wins += 1;
-        game.scores[loser_id].losses += 1;
+        self.playGame(game, view, &arena_allocator) catch |err| switch (err) {
+            error.PlayerError => std.log.info("Game halted early because of uncooperative player", .{}),
+            else => return err,
+        };
         try view.turn(game);
+        const winner_id = game.winner();
         try view.finishGame(winner_id, game);
 
         game.current_game += 1;
@@ -166,10 +167,9 @@ pub fn playGame(
     game: *Game,
     view: View.Interface,
     arena_alloc: *std.heap.ArenaAllocator,
-) !usize {
+) !void {
     const gpa = arena_alloc.allocator();
     std.log.debug("Starting game", .{});
-    try game.resetState();
 
     for (&game.players) |player| {
         try player.writeMessage(.{ .game_start = {} });
@@ -177,57 +177,107 @@ pub fn playGame(
     }
 
     std.log.debug("Placing ships...", .{});
-    var player_id: usize = 0;
-    for (0..1e6) |_| {
-        // TODO: bug where one player places for both
-        player_id = (player_id + 1) % 2;
-        const entry = game.entries[player_id];
-        const player = game.players[player_id];
-        const maybe_message = try player.pollMessage(gpa);
-        std.log.debug("message: {any}", .{maybe_message});
-        const message = maybe_message orelse continue;
-        switch (message) {
-            .place_ships_response => |placements| {
-                game.placeShips(player_id, placements) catch |err| {
-                    std.log.err("Place ships response: {}", .{err});
-                    switch (err) {
-                        error.InvalidPlacement => try player.writeMessage(.{ .place_ships_request = {} }),
-                        else => return err,
-                    }
-                };
-            },
-            else => std.log.info("{s}: !Unexpected message: {f}", .{ entry.name, message }),
-        }
-        if (game.allPlaced()) break;
-        std.log.debug("Waiting for ships to be placed", .{});
-    } else {
-        return error.InfiniteLoop;
-    }
-
+    try self.placeShips(gpa, game);
     std.log.debug("Ships placed", .{});
+
     // Take turns
     // TODO: randomize player_id
+    var player_id: usize = 0;
+    var winner_id: usize = 0;
     for (0..1e6) |_| {
         try view.turn(game);
 
         if (game.boards[0].allSunk()) {
             try game.players[0].writeMessage(.{ .lose = {} });
             try game.players[1].writeMessage(.{ .win = {} });
-            return 1;
+            winner_id = 1;
+            break;
         } else if (game.boards[1].allSunk()) {
             try game.players[0].writeMessage(.{ .win = {} });
             try game.players[1].writeMessage(.{ .lose = {} });
-            return 0;
+            winner_id = 0;
+            break;
         }
 
-        try self.playGameTurn(arena_alloc.allocator(), game, view, player_id);
+        try self.playGameTurn(gpa, game, view, player_id);
 
         player_id = (player_id + 1) % 2;
         _ = arena_alloc.reset(.retain_capacity);
-        self.time.sleep(50 * std.time.ns_per_ms);
+        self.time.sleep(10 * std.time.ns_per_ms);
     } else {
         return error.InfiniteLoop;
     }
+    const loser_id = (winner_id + 1) % 2;
+    game.scores[winner_id].wins += 1;
+    game.scores[loser_id].losses += 1;
+}
+
+fn placeShips(self: *Self, gpa: std.mem.Allocator, game: *Game) !void {
+    var player_id: usize = 0;
+    const base_attempt = RequestAttempt{
+        .start_ms = self.time.nowMs(),
+        .timeout_ms = 1000,
+        .max_tries = 3,
+    };
+    var attempts = [2]RequestAttempt{ base_attempt, base_attempt };
+    // Apply any penalties for late answers
+    defer for (0..2) |i| {
+        const attempt = &attempts[i];
+        game.scores[i].penalties += attempt.retries;
+    };
+    var placed = [2]bool{ false, false };
+    for (0..1e6) |_| {
+        std.log.debug("Waiting for ships to be placed", .{});
+        if (placed[0] and placed[1]) break;
+        player_id = (player_id + 1) % 2;
+        if (placed[player_id]) continue;
+        defer self.time.sleep(10 * std.time.ns_per_ms);
+
+        const attempt = &attempts[player_id];
+        const now = self.time.nowMs();
+        if (attempt.timedout(now)) {
+            // TODO: player losses
+            endGameEarly(game, &placed);
+            return error.PlayerError;
+        }
+
+        const player = game.players[player_id];
+        const maybe_message = try player.pollMessage(gpa);
+        std.log.debug("message: {any}", .{maybe_message});
+
+        const message = maybe_message orelse continue;
+        if (message != .place_ships_response) {
+            const entry = game.entries[player_id];
+            std.log.info("{s}: !Unexpected message: {f}", .{ entry.name, message });
+            continue;
+        }
+        const placements = message.place_ships_response;
+        game.placeShips(player_id, placements) catch |err| {
+            std.log.err("Place ships response: {}", .{err});
+            switch (err) {
+                error.InvalidPlacement => try player.writeMessage(.{ .place_ships_request = {} }),
+                else => return err,
+            }
+        };
+        placed[player_id] = true;
+    } else return error.InfiniteLoop;
+}
+
+/// Called when one or more player fails to cooperate. Placed[i] is
+/// true if player i successfully placed ships before this function was called
+pub fn endGameEarly(game: *Game, placed: *const [2]bool) void {
+    if (placed[0] and !placed[1]) {
+        game.scores[0].wins += 1;
+        game.scores[1].losses += 1;
+        return;
+    }
+    if (placed[1] and !placed[0]) {
+        game.scores[1].wins += 1;
+        game.scores[0].losses += 1;
+        return;
+    }
+    game.scores[0].losses += 1;
+    game.scores[1].losses += 1;
 }
 
 pub fn playGameTurn(
@@ -418,75 +468,14 @@ fn setNonBlocking(handle: std.fs.File.Handle) !void {
     _ = try std.posix.fcntl(handle, std.posix.F.SETFL, flags);
 }
 
-pub const PlayerBridge = struct {
-    // Need to hold on to the File.Writer so I can inspect writer.err
-    // to differentiate a real ReadFailed and a WouldBlock
-    stdin: std.fs.File.Writer,
-    stdout: std.fs.File.Reader,
-
-    pub fn init(
-        stdin: std.fs.File,
-        stdout: std.fs.File,
-        stdin_buf: []u8,
-        stdout_buf: []u8,
-    ) PlayerBridge {
-        return .{
-            .stdin = stdin.writer(stdin_buf),
-            .stdout = stdout.reader(stdout_buf),
-        };
-    }
-
-    pub fn writeMessage(self: *PlayerBridge, message: Protocol.Message) !void {
-        self.writeMessageImpl(message) catch |err| {
-            if (err != error.WriteFailed) return err;
-            const actual_err = self.stdin.err orelse return error.UnknownRead;
-            switch (actual_err) {
-                error.WouldBlock => return error.Undelivered,
-                error.BrokenPipe => {
-                    // Don't return an error here because this could be intentionally.
-                    // Player could have written the rest of their output and exited.
-                    // If there is a problem we will know when trying to read a response
-                    // that won't ever come.
-                    std.log.warn("Message {f} not delivered b/c process likely died", .{message});
-                    return;
-                },
-                else => return actual_err,
-            }
-        };
-    }
-
-    fn writeMessageImpl(self: *PlayerBridge, message: Protocol.Message) !void {
-        const stdin = &self.stdin.interface;
-        try stdin.print("{f}\n", .{message});
-        try stdin.flush();
-    }
-
-    pub fn pollMessage(self: *PlayerBridge, gpa: std.mem.Allocator) !?Protocol.Message {
-        const stdout = &self.stdout.interface;
-        const message = Protocol.Message.parse(stdout, gpa) catch |err| {
-            // TODO: actually impl for UnknownMessage
-            if (err == error.UnknownMessage) return null;
-            if (err != error.ReadFailed) return err;
-
-            const actual_err = self.stdout.err orelse return error.UnknownWrite;
-            switch (actual_err) {
-                error.WouldBlock => return null,
-                else => return err,
-            }
-        };
-        return message;
-    }
-};
-
 pub const game_width = 11;
 pub const game_height = 9;
 pub const BattleshipBoard = Battleship.Board(game_width, game_height, &game_ships);
 pub const Game = struct {
     entries: [2]*const Meta.Entry,
-    players: [2]*PlayerBridge,
+    players: [2]Bridge.Interface,
     boards: [2]BattleshipBoard = undefined,
     scores: [2]Score = [2]Score{ .{}, .{} },
-    placed: u8 = 0,
 
     player0_id: usize,
     player1_id: usize,
@@ -498,8 +487,8 @@ pub const Game = struct {
     pub fn init(
         player0_id: usize,
         player1_id: usize,
-        process0: *PlayerBridge,
-        process1: *PlayerBridge,
+        process0: Bridge.Interface,
+        process1: Bridge.Interface,
         entry0: *const Meta.Entry,
         entry1: *const Meta.Entry,
         total_games: u32,
@@ -508,7 +497,7 @@ pub const Game = struct {
     ) Game {
         return .{
             .entries = [2]*const Meta.Entry{ entry0, entry1 },
-            .players = [2]*PlayerBridge{ process0, process1 },
+            .players = [2]Bridge.Interface{ process0, process1 },
             .player0_id = player0_id,
             .player1_id = player1_id,
             .total_games = total_games,
@@ -521,23 +510,10 @@ pub const Game = struct {
         _ = self;
     }
 
-    pub fn allPlaced(self: *Game) bool {
-        return self.placed >= 2;
-    }
-
-    fn playerIndex(self: *Game, player: *PlayerBridge) usize {
-        if (&self.players[0] == player) return 0;
-        return 1;
-    }
-
     fn startRound(self: *Game) !void {
         for (&self.players) |player| {
             try player.writeMessage(.{ .round_start = {} });
         }
-    }
-
-    fn resetState(self: *Game) !void {
-        self.placed = 0;
     }
 
     pub fn placeShips(
@@ -550,8 +526,6 @@ pub const Game = struct {
         board.* = BattleshipBoard.init(placements) catch {
             return error.InvalidPlacement;
         };
-        self.placed += 1;
-        return;
     }
 
     fn takeTurn(self: *Game, player_id: usize, x: usize, y: usize) !Battleship.Shot {
@@ -581,6 +555,11 @@ pub const Game = struct {
             .Hit => .{ .hit = {} },
             .Sink => |id| .{ .sink = board.getShip(id).size },
         };
+    }
+
+    fn winner(self: *Game) usize {
+        // TODO: ties
+        return if (self.scores[0].value() > self.scores[1].value()) 0 else 1;
     }
 };
 
@@ -653,6 +632,53 @@ fn pairKey(player0_id: usize, player1_id: usize) [2]usize {
     return key;
 }
 
+const RequestAttempt = struct {
+    start_ms: i64,
+    timeout_ms: i64,
+    max_tries: i32,
+    retries: i32 = 0,
+
+    pub fn timedout(self: *RequestAttempt, now: i64) bool {
+        const elapsed = now - self.start_ms;
+        const tries: i32 = @intCast(@divTrunc(elapsed, self.timeout_ms));
+        if (tries >= self.max_tries) {
+            self.retries = self.max_tries;
+            return true;
+        }
+        self.retries = tries;
+        return false;
+    }
+};
+
+test "RequestAttempt" {
+    var fake_time = Time.Fake{};
+    const time = fake_time.interface();
+
+    var attempt = RequestAttempt{
+        .start_ms = time.nowMs(),
+        .timeout_ms = 1000,
+        .max_tries = 3,
+    };
+    var now = time.nowMs();
+    try std.testing.expect(!attempt.timedout(now));
+    try std.testing.expectEqual(0, attempt.retries);
+
+    time.sleep(1000 * std.time.ns_per_ms);
+    now = time.nowMs();
+    try std.testing.expect(!attempt.timedout(now));
+    try std.testing.expectEqual(1, attempt.retries);
+
+    time.sleep(1000 * std.time.ns_per_ms);
+    now = time.nowMs();
+    try std.testing.expect(!attempt.timedout(now));
+    try std.testing.expectEqual(2, attempt.retries);
+
+    time.sleep(1000 * std.time.ns_per_ms);
+    now = time.nowMs();
+    try std.testing.expect(attempt.timedout(now));
+    try std.testing.expectEqual(3, attempt.retries);
+}
+
 const TestEnv = struct {
     const entry0 = Meta.Entry.defaultForTest("entry0");
     const entry1 = Meta.Entry.defaultForTest("entry1");
@@ -672,8 +698,8 @@ const TestEnv = struct {
 
     fn testGame(
         self: *TestEnv,
-        player0: TestPlayer.Fn,
-        player1: TestPlayer.Fn,
+        player_events0: []TestPlayer.Event,
+        player_events1: []TestPlayer.Event,
     ) !Game {
         var tourney = try Self.init(
             std.testing.allocator,
@@ -686,39 +712,81 @@ const TestEnv = struct {
         );
         defer tourney.deinit();
 
-        var stdin_buf0: [256]u8 = undefined;
-        var stdout_buf0: [256]u8 = undefined;
-        const process0 = try spawnFn(player0);
-        process0.thread.detach();
-        var bridge0 = PlayerBridge.init(process0.stdin, process0.stdout, &stdin_buf0, &stdout_buf0);
-
-        var stdin_buf1: [256]u8 = undefined;
-        var stdout_buf1: [256]u8 = undefined;
-        const process1 = try spawnFn(player1);
-        process1.thread.detach();
-        var bridge1 = PlayerBridge.init(process1.stdin, process1.stdout, &stdin_buf1, &stdout_buf1);
-
         var test_view: View.Unittest = .{};
         const view: View.Interface = .{ .unittest = &test_view };
 
-        var game = Game.init(0, 1, &bridge0, &bridge1, &entry0, &entry1, 1, 1, 1);
+        var buffer0: [256]u8 = undefined;
+        var reader0 = TestPlayer.EventReader.init(
+            self.time.interface(),
+            player_events0,
+            &buffer0,
+        );
+        var discarding0 = std.Io.Writer.Discarding.init(&.{});
+        var bridge0 = Bridge.InMemory.init(&discarding0.writer, &reader0.interface);
+
+        var buffer1: [256]u8 = undefined;
+        var reader1 = TestPlayer.EventReader.init(
+            self.time.interface(),
+            player_events1,
+            &buffer1,
+        );
+        var discarding1 = std.Io.Writer.Discarding.init(&.{});
+        var bridge1 = Bridge.InMemory.init(&discarding1.writer, &reader1.interface);
+
+        var game = Game.init(
+            0,
+            1,
+            .{ .in_memory = &bridge0 },
+            .{ .in_memory = &bridge1 },
+            &entry0,
+            &entry1,
+            1,
+            1,
+            1,
+        );
         defer game.deinit();
 
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
 
-        _ = try tourney.playGame(&game, view, &arena);
+        _ = tourney.playGame(&game, view, &arena) catch |err| switch (err) {
+            error.PlayerError => std.log.debug("Test game ended early because of uncooperative player", .{}),
+            else => return err,
+        };
         return game;
     }
 };
 
+const expect = std.testing.expect;
+const expectEqual = std.testing.expectEqual;
+
 test "both players behaved" {
     std.testing.log_level = .err;
     var env = TestEnv.init();
-    var game = try env.testGame(TestPlayer.behaved, TestPlayer.behaved);
+    const gpa = std.testing.allocator;
+    var events0 = try TestPlayer.behaved(gpa);
+    defer events0.deinit(gpa);
+
+    var game = try env.testGame(events0.items, events0.items);
     defer game.deinit();
 
     const sunk0 = game.boards[0].allSunk();
     const sunk1 = game.boards[1].allSunk();
-    try std.testing.expect(sunk0 ^ sunk1);
+    try expect(sunk0 ^ sunk1);
+    for (&game.scores) |score| try expectEqual(0, score.penalties);
+}
+
+test "one player unresponsive" {
+    std.testing.log_level = .err;
+    var env = TestEnv.init();
+    const gpa = std.testing.allocator;
+    var behaved_events = try TestPlayer.behaved(gpa);
+    defer behaved_events.deinit(gpa);
+
+    const no_events = &.{};
+    var game = try env.testGame(behaved_events.items, no_events);
+    defer game.deinit();
+
+    try expectEqual(0, game.scores[0].penalties);
+    try expectEqual(3, game.scores[1].penalties);
 }
