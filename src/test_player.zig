@@ -22,6 +22,7 @@ var placements = [_]Battleship.Placement{
 
 pub const Event = union(enum) {
     message: Protocol.Message,
+    corrupt_message: []const u8,
     sleep_ms: i64,
 };
 
@@ -56,12 +57,9 @@ pub const EventReader = struct {
                 return Reader.StreamError.ReadFailed;
             }
             switch (self.events[0]) {
-                .message => |msg| {
-                    std.log.info("emit msg", .{});
-                    return self.writeMessage(msg, writer, limit);
-                },
+                .message => |msg| return self.writeMessage(msg, writer, limit),
+                .corrupt_message => |msg| return self.writeBytes(msg, writer, limit),
                 .sleep_ms => |ms| {
-                    std.log.info("emit sleep", .{});
                     self.sleep_until = self.time.nowMs() + ms;
                     self.events = self.events[1..];
                 },
@@ -78,9 +76,17 @@ pub const EventReader = struct {
         var buffer: [256]u8 = undefined;
         var subwriter = Writer.fixed(&buffer);
         try subwriter.print("{f}\n", .{msg});
+        return self.writeBytes(subwriter.buffered(), writer, limit);
+    }
 
-        const remaining = subwriter.buffered()[self.msg_idx..];
-        const bytes = limit.slice(remaining);
+    fn writeBytes(
+        self: *EventReader,
+        msg: []const u8,
+        writer: *Writer,
+        limit: std.Io.Limit,
+    ) Reader.StreamError!usize {
+        const remaining = msg[self.msg_idx..];
+        const bytes = limit.sliceConst(remaining);
         const n = try writer.write(bytes);
 
         if (n == remaining.len) {
@@ -120,6 +126,26 @@ pub fn laggy(gpa: std.mem.Allocator) !std.ArrayList(Event) {
         result.appendAssumeCapacity(.{ .sleep_ms = 1000 });
         result.appendAssumeCapacity(event);
     }
+    return result;
+}
+
+/// Simulates a player like `behaved` but eventually stops responding
+pub fn unreliable(gpa: std.mem.Allocator) !std.ArrayList(Event) {
+    var behaved_events = try behaved(gpa);
+    const len = behaved_events.items.len;
+    behaved_events.shrinkAndFree(gpa, len / 2);
+    return behaved_events;
+}
+
+pub fn corrupt(gpa: std.mem.Allocator) !std.ArrayList(Event) {
+    var result = try std.ArrayList(Event).initCapacity(gpa, 3);
+
+    // Trying to write a long message is important to make sure
+    // buffers don't overflow
+    const long_junk: [999]u8 = .{0} ** 999;
+    result.appendAssumeCapacity(.{ .corrupt_message = &long_junk });
+    result.appendAssumeCapacity(.{ .corrupt_message = "bar baz" });
+    result.appendAssumeCapacity(.{ .corrupt_message = "not-a-message;0;1;\n" });
     return result;
 }
 
@@ -210,6 +236,7 @@ test "EventReader: behaved" {
                 const ms_u64: u64 = @intCast(ms);
                 time.sleep(ms_u64 * std.time.ns_per_ms);
             },
+            .corrupt_message => unreachable,
         }
     }
 }

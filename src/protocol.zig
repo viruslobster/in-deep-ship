@@ -29,9 +29,23 @@ pub const Message = union(enum) {
     lose: void,
 
     pub fn parse(source: *std.Io.Reader, gpa: std.mem.Allocator) !?Message {
-        const buffer = try source.takeDelimiter('\n') orelse return null;
+        const buffer = source.takeDelimiter('\n') catch |err| switch (err) {
+            error.StreamTooLong => {
+                const n = source.buffer.len;
+                std.log.warn("stream too long, discarding at most {d} bytes", .{n});
+                _ = try source.discard(.limited(n));
+                return null;
+            },
+            else => return err,
+        } orelse return null;
 
-        errdefer std.log.err("failed to parse '{s}'", .{buffer});
+        return parseImpl(buffer, gpa) catch |err| {
+            std.log.warn("parse failed: {any}: {s}", .{ err, buffer });
+            return null;
+        };
+    }
+
+    pub fn parseImpl(buffer: []u8, gpa: std.mem.Allocator) !?Message {
         var parts = std.mem.splitScalar(u8, buffer, ';');
         const msg_type = parts.next() orelse return error.TooFewParts;
 

@@ -336,13 +336,6 @@ pub fn playGameTurn(
     }
 }
 
-fn mockProcess(stdin: *std.Io.Reader, stdout: *std.Io.Writer) !void {
-    _ = stdin;
-    const msg = Protocol.Message{ .turn_response = .{ .x = 1, .y = 1 } };
-    try stdout.print("{f}\n", .{msg});
-    try stdout.flush();
-}
-
 fn sortShips(ships: []Battleship.Ship) void {
     const Context = struct {
         fn lessThan(_: @This(), ship0: Battleship.Ship, ship1: Battleship.Ship) bool {
@@ -812,3 +805,45 @@ test "one player laggy" {
     try expectEqual(0, game.scores[0].penalties);
     try expectEqual(51, game.scores[1].penalties);
 }
+
+test "one player unreliable" {
+    //std.testing.log_level = .debug;
+    var env = TestEnv.init();
+    const gpa = std.testing.allocator;
+
+    var behaved_events = try TestPlayer.behaved(gpa);
+    defer behaved_events.deinit(gpa);
+
+    var unreliable_events = try TestPlayer.unreliable(gpa);
+    defer unreliable_events.deinit(gpa);
+
+    var game = try env.testGame(unreliable_events.items, behaved_events.items);
+    defer game.deinit();
+
+    const sunk0 = game.boards[0].allSunk();
+    const sunk1 = game.boards[1].allSunk();
+    try expect(sunk0);
+    try expect(!sunk1);
+    try expectEqual(1, game.winner());
+    // TODO: how many penalties should they have?
+}
+
+test "one player corrupt" {
+    std.testing.log_level = .err;
+    var env = TestEnv.init();
+    const gpa = std.testing.allocator;
+
+    var behaved_events = try TestPlayer.behaved(gpa);
+    defer behaved_events.deinit(gpa);
+
+    var currupt_events = try TestPlayer.corrupt(gpa);
+    defer currupt_events.deinit(gpa);
+
+    var game = try env.testGame(behaved_events.items, currupt_events.items);
+    defer game.deinit();
+
+    try expectEqual(0, game.winner());
+    // TODO: how many penalties should they have?
+}
+
+// TODO: one player drops, one player currupted, one player latent currupted, both player variants

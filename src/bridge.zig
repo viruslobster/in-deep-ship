@@ -65,8 +65,6 @@ pub const File = struct {
     pub fn pollMessage(self: *File, gpa: std.mem.Allocator) !?Protocol.Message {
         const stdout = &self.stdout.interface;
         const message = Protocol.Message.parse(stdout, gpa) catch |err| {
-            // TODO: actually impl for UnknownMessage
-            if (err == error.UnknownMessage) return null;
             if (err != error.ReadFailed) return err;
 
             const actual_err = self.stdout.err orelse return error.UnknownWrite;
@@ -98,9 +96,6 @@ pub const InMemory = struct {
 
     pub fn pollMessage(self: *InMemory, gpa: std.mem.Allocator) !?Protocol.Message {
         const message = Protocol.Message.parse(self.stdout, gpa) catch |err| switch (err) {
-            // TODO: actually impl for UnknownMessage
-            error.UnknownMessage => return null,
-
             // For this implementation only, assume ReadFailed is equivalent
             // to WouldBlock in the File implementation
             error.ReadFailed => return null,
